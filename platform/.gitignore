@@ -1,1 +1,21 @@
-iPWR-SMRs-in-OpenMC/
+# Python cache
+__pycache__/
+*.pyc
+
+# Simulation outputs (OpenMC / nuclear runs)
+runs/
+*.h5
+*.hdf5
+*.out
+*.xml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node frontend
+node_modules/
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
