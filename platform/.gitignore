@@ -2,20 +2,16 @@
 __pycache__/
 *.pyc
 
-# Simulation outputs (OpenMC / nuclear runs)
+# OpenMC / simulation outputs
 runs/
 *.h5
-*.hdf5
 *.out
-*.xml
+statepoint*
+summary.h5
+tallies.*
 
-# Jupyter
-.ipynb_checkpoints/
-
-# Node frontend
+# Frontend
 node_modules/
-dist/
 
-# OS files
+# OS
 .DS_Store
-Thumbs.db
