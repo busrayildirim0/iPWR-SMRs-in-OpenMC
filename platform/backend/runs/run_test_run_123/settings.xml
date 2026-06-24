@@ -3,7 +3,7 @@
   <run_mode>eigenvalue</run_mode>
   <particles>500</particles>
   <batches>10</batches>
-  <inactive>2</inactive>
+  <inactive>5</inactive>
   <source type="independent" strength="1.0" particle="neutron">
     <space type="box">
       <parameters>-10.71 -10.71 -50.0 10.71 10.71 50.0</parameters>
@@ -18,5 +18,6 @@
     <lower_left>-10.71 -10.71 -50.0</lower_left>
     <upper_right>10.71 10.71 50.0</upper_right>
   </mesh>
+  <ifp_n_generation>5</ifp_n_generation>
   <temperature_method>interpolation</temperature_method>
 </settings>

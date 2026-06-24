@@ -97,12 +97,24 @@ export default function Dashboard() {
     particles: 10000,
     batches: 50,
     inactive_batches: 10,
-    temperature: 566.5
+    temperature: 566.5,
+    boundary_type: 'Reflective',
+    kinetics_enabled: false,
+    safety_coefs_enabled: false,
+    depletion_enabled: false,
+    shielding_enabled: false,
+    economy_enabled: false,
+    flux_3d_enabled: false
   });
 
   // Config tab state
-  const [configTab, setConfigTab] = useState('geometry'); // 'geometry', 'materials', 'simulation'
+  const [configTab, setConfigTab] = useState('geometry'); // 'geometry', 'materials', 'simulation', 'advanced'
   
+  // Results detailed tab state
+  const [resultsTab, setResultsTab] = useState('core'); // 'core', 'kinetics', 'safety', 'flux3d', 'depletion', 'economy', 'shielding'
+  const [zSliceIndex, setZSliceIndex] = useState(5);
+  const [zMapType, setZMapType] = useState('power');
+
   // Platform tab state
   const [mainTab, setMainTab] = useState('simulation'); // 'simulation', 'dataset'
   
@@ -145,7 +157,16 @@ export default function Dashboard() {
       .then(data => {
         setPresets(data);
         if (data.NuScale) {
-          setParams(data.NuScale);
+          setParams({
+            boundary_type: 'Reflective',
+            kinetics_enabled: false,
+            safety_coefs_enabled: false,
+            depletion_enabled: false,
+            shielding_enabled: false,
+            economy_enabled: false,
+            flux_3d_enabled: false,
+            ...data.NuScale
+          });
         }
       })
       .catch(err => console.error("Error loading presets:", err));
@@ -181,7 +202,16 @@ export default function Dashboard() {
     setActivePreset(name);
     if (name === 'Custom') return;
     if (presets[name]) {
-      setParams(presets[name]);
+      setParams({
+        boundary_type: 'Reflective',
+        kinetics_enabled: false,
+        safety_coefs_enabled: false,
+        depletion_enabled: false,
+        shielding_enabled: false,
+        economy_enabled: false,
+        flux_3d_enabled: false,
+        ...presets[name]
+      });
       // Adjust overlay if switching presets
       setActiveOverlay('none');
     }
@@ -191,8 +221,35 @@ export default function Dashboard() {
   const handleParamChange = (key, val) => {
     setParams(prev => {
       const next = { ...prev, [key]: val };
-      // Keep active preset to 'Custom' if user modifies fields
-      setActivePreset('Custom');
+      
+      // Core physical reactor parameters that define a preset
+      const physicalKeys = [
+        'lattice_type', 'active_height', 'pin_pitch', 'fuel_radius',
+        'gap_radius', 'clad_radius', 'gt_inner_radius', 'gt_outer_radius',
+        'enrichment', 'soluble_boron', 'clad_material', 'poison_enabled',
+        'poison_fraction', 'control_rod_state', 'control_rod_material'
+      ];
+      
+      if (physicalKeys.includes(key)) {
+        let matchedPreset = 'Custom';
+        for (const [presetName, presetParams] of Object.entries(presets)) {
+          let match = true;
+          for (const pKey of physicalKeys) {
+            const currentVal = pKey === key ? val : prev[pKey];
+            const presetVal = presetParams[pKey];
+            if (currentVal !== presetVal) {
+              match = false;
+              break;
+            }
+          }
+          if (match) {
+            matchedPreset = presetName;
+            break;
+          }
+        }
+        setActivePreset(matchedPreset);
+      }
+      
       return next;
     });
   };
@@ -438,6 +495,220 @@ export default function Dashboard() {
     };
   }, [simulationResults, activeOverlay]);
 
+  // Depletion k-eff vs days plot
+  const depletionKeffPlot = useMemo(() => {
+    if (!simulationResults?.depletion?.days) return null;
+    return {
+      data: [{
+        x: simulationResults.depletion.days,
+        y: simulationResults.depletion.k_eff,
+        error_y: {
+          type: 'data',
+          array: simulationResults.depletion.k_eff_std,
+          visible: true,
+          color: '#ef4444'
+        },
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: 'k-effective',
+        line: { color: '#34d399', width: 2 },
+        marker: { size: 6, color: '#059669' }
+      }],
+      layout: {
+        title: 'k-Effective Depletion Curve',
+        xaxis: { title: 'Time (Days)', gridcolor: '#1e293b' },
+        yaxis: { title: 'k-eff', gridcolor: '#1e293b' },
+        margin: { l: 50, r: 20, t: 40, b: 40 },
+        height: 280
+      }
+    };
+  }, [simulationResults]);
+
+  // Depletion isotope concentrations vs days plot
+  const depletionIsotopesPlot = useMemo(() => {
+    if (!simulationResults?.depletion?.days) return null;
+    return {
+      data: [
+        {
+          x: simulationResults.depletion.days,
+          y: simulationResults.depletion.xe135,
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: 'Xe-135 (Poison)',
+          line: { color: '#c084fc', width: 2 }
+        },
+        {
+          x: simulationResults.depletion.days,
+          y: simulationResults.depletion.sm149,
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: 'Sm-149 (Poison)',
+          line: { color: '#fb7185', width: 2 }
+        },
+        {
+          x: simulationResults.depletion.days,
+          y: simulationResults.depletion.pu239,
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: 'Pu-239 (Breeding)',
+          line: { color: '#fbbf24', width: 2 }
+        }
+      ],
+      layout: {
+        title: 'Fission Product Poisons & Actinide Evolution',
+        xaxis: { title: 'Time (Days)', gridcolor: '#1e293b' },
+        yaxis: { title: 'Atom Concentration (atoms/b-cm)', type: 'log', gridcolor: '#1e293b' },
+        margin: { l: 65, r: 20, t: 40, b: 40 },
+        height: 280
+      }
+    };
+  }, [simulationResults]);
+
+  // 3D slice heatmap
+  const zSlicePlot = useMemo(() => {
+    if (!simulationResults?.power_3d || !simulationResults?.flux_3d) return null;
+    const zData = zMapType === 'power' ? simulationResults.power_3d[zSliceIndex] : simulationResults.flux_3d[zSliceIndex];
+    if (!zData) return null;
+    return {
+      data: [{
+        z: zData,
+        type: 'heatmap',
+        colorscale: zMapType === 'power' ? 'Inferno' : 'Viridis',
+        showscale: true,
+        colorbar: { thickness: 15, len: 0.9 }
+      }],
+      layout: {
+        title: `3D Mesh Slice Z-${zSliceIndex + 1} (${zMapType === 'power' ? 'Power' : 'Flux'})`,
+        xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
+        yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+        margin: { l: 50, r: 20, t: 40, b: 40 },
+        height: 380
+      }
+    };
+  }, [simulationResults, zSliceIndex, zMapType]);
+
+  // Biological dose rate map
+  const doseRatePlot = useMemo(() => {
+    if (!simulationResults?.dose_rate_map) return null;
+    return {
+      data: [{
+        z: simulationResults.dose_rate_map,
+        type: 'heatmap',
+        colorscale: 'Hot',
+        showscale: true,
+        colorbar: { thickness: 15, len: 0.9 }
+      }],
+      layout: {
+        title: 'Biological Dose Rate Map (Sv/h)',
+        xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
+        yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+        margin: { l: 50, r: 20, t: 40, b: 40 },
+        height: 380
+      }
+    };
+  }, [simulationResults]);
+
+  // Neutron balance pie chart
+  const neutronBalancePlot = useMemo(() => {
+    if (!simulationResults) return null;
+    const abs = simulationResults.global_absorption_rate || 0;
+    const leak = simulationResults.leakage_rate || 0;
+    
+    return {
+      data: [{
+        values: [abs, leak],
+        labels: ['Absorption', 'Leakage'],
+        type: 'pie',
+        hole: 0.4,
+        marker: {
+          colors: ['#38bdf8', '#fb7185']
+        },
+        textinfo: 'percent+label',
+        hoverinfo: 'label+value+percent'
+      }],
+      layout: {
+        title: 'Neutron Destination Balance',
+        margin: { l: 20, r: 20, t: 40, b: 20 },
+        height: 280,
+        showlegend: true,
+        legend: { orientation: 'h', y: -0.1 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#cbd5e1' }
+      }
+    };
+  }, [simulationResults]);
+
+  // Reaction rates bar chart
+  const reactionRatesBarPlot = useMemo(() => {
+    if (!simulationResults) return null;
+    return {
+      data: [{
+        x: ['Fission', 'Absorption', 'Scattering', '(n,2n)'],
+        y: [
+          simulationResults.global_fission_rate || 0,
+          simulationResults.global_absorption_rate || 0,
+          simulationResults.global_scatter_rate || 0,
+          simulationResults.global_n2n_rate || 0
+        ],
+        type: 'bar',
+        marker: {
+          color: ['#10b981', '#3b82f6', '#64748b', '#8b5cf6']
+        }
+      }],
+      layout: {
+        title: 'Global Reaction Rates (reactions/s)',
+        yaxis: { type: 'log', title: 'Rate (log scale)', gridcolor: '#1e293b' },
+        margin: { l: 50, r: 20, t: 40, b: 40 },
+        height: 280,
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#cbd5e1' }
+      }
+    };
+  }, [simulationResults]);
+
+  // Axial profile chart
+  const axialProfilePlot = useMemo(() => {
+    if (!simulationResults?.power_3d || !simulationResults?.flux_3d) return null;
+    const data3D = zMapType === 'power' ? simulationResults.power_3d : simulationResults.flux_3d;
+    
+    const averages = data3D.map(slice => {
+      let sum = 0;
+      let count = 0;
+      slice.forEach(row => {
+        row.forEach(val => {
+          if (val > 0) {
+            sum += val;
+            count++;
+          }
+        });
+      });
+      return count > 0 ? sum / count : 0;
+    });
+    
+    const heights = Array.from({length: 10}, (_, i) => i + 1);
+    
+    return {
+      data: [{
+        x: averages,
+        y: heights,
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: `Average Axial ${zMapType === 'power' ? 'Power' : 'Flux'}`,
+        line: { color: zMapType === 'power' ? '#f97316' : '#06b6d4', width: 2 },
+        marker: { size: 6 }
+      }],
+      layout: {
+        title: `Axial ${zMapType === 'power' ? 'Power' : 'Flux'} Profile`,
+        xaxis: { title: 'Average Value', gridcolor: '#1e293b' },
+        yaxis: { title: 'Axial Layer (Z)', tickvals: heights, gridcolor: '#1e293b' },
+        margin: { l: 50, r: 20, t: 40, b: 40 },
+        height: 380
+      }
+    };
+  }, [simulationResults, zMapType]);
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0f19]">
       {/* Platform Header */}
@@ -452,15 +723,15 @@ export default function Dashboard() {
         
         <div className="flex items-center gap-4">
           {/* Main platform Mode tabs */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-1 flex gap-1">
+          <div className="bg-slate-900/40 border border-slate-800/80 rounded-lg p-1 flex gap-1 shadow-inner">
             <button 
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-all ${mainTab === 'simulation' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`tab-btn ${mainTab === 'simulation' ? 'active' : ''}`}
               onClick={() => setMainTab('simulation')}
             >
               <Cpu className="w-3.5 h-3.5" /> Simulation
             </button>
             <button 
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-all ${mainTab === 'dataset' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`tab-btn ${mainTab === 'dataset' ? 'active' : ''}`}
               onClick={() => setMainTab('dataset')}
             >
               <Database className="w-3.5 h-3.5" /> Dataset Gen
@@ -512,6 +783,12 @@ export default function Dashboard() {
               className={`flex-1 pb-2 text-center text-xs font-bold transition-all ${configTab === 'simulation' ? 'border-b-2 border-sky-400 text-sky-400' : 'text-slate-500 hover:text-slate-400'}`}
             >
               Simulation
+            </button>
+            <button
+              onClick={() => setConfigTab('advanced')}
+              className={`flex-1 pb-2 text-center text-xs font-bold transition-all ${configTab === 'advanced' ? 'border-b-2 border-sky-400 text-sky-400' : 'text-slate-500 hover:text-slate-400'}`}
+            >
+              Advanced
             </button>
           </div>
 
@@ -748,6 +1025,104 @@ export default function Dashboard() {
                 </div>
               </>
             )}
+
+            {configTab === 'advanced' && (
+              <div className="flex flex-col gap-4">
+                <div className="form-group">
+                  <label className="form-label">Boundary Condition</label>
+                  <select
+                    value={params.boundary_type}
+                    onChange={(e) => handleParamChange('boundary_type', e.target.value)}
+                    className="form-select text-slate-200"
+                  >
+                    <option value="Reflective">Reflective (Infinite Assembly)</option>
+                    <option value="Vacuum">Vacuum (Leakage Study)</option>
+                  </select>
+                </div>
+                
+                <div className="border-t border-slate-800/60 pt-4 flex flex-col gap-3">
+                  <span className="text-[11px] font-bold text-sky-400 uppercase tracking-wider block mb-1">Analysis Modules</span>
+                  
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="kinetics_enabled"
+                      checked={params.kinetics_enabled}
+                      onChange={(e) => handleParamChange('kinetics_enabled', e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
+                    />
+                    <label htmlFor="kinetics_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
+                      Kinetics Parameters (&beta;<sub>eff</sub>, Rod Worth)
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="safety_coefs_enabled"
+                      checked={params.safety_coefs_enabled}
+                      onChange={(e) => handleParamChange('safety_coefs_enabled', e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
+                    />
+                    <label htmlFor="safety_coefs_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
+                      Safety Coefficients (FTC, MTC, Void)
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="flux_3d_enabled"
+                      checked={params.flux_3d_enabled}
+                      onChange={(e) => handleParamChange('flux_3d_enabled', e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
+                    />
+                    <label htmlFor="flux_3d_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
+                      3D Spatial Mesh Mapping
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="depletion_enabled"
+                      checked={params.depletion_enabled}
+                      onChange={(e) => handleParamChange('depletion_enabled', e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
+                    />
+                    <label htmlFor="depletion_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
+                      Fuel Depletion / Burnup Analysis
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="economy_enabled"
+                      checked={params.economy_enabled}
+                      onChange={(e) => handleParamChange('economy_enabled', e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
+                    />
+                    <label htmlFor="economy_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
+                      Reaction Rates & Spectral Indices
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="shielding_enabled"
+                      checked={params.shielding_enabled}
+                      onChange={(e) => handleParamChange('shielding_enabled', e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
+                    />
+                    <label htmlFor="shielding_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
+                      Biological Dose & Clad DPA
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Trigger button */}
@@ -849,110 +1224,615 @@ export default function Dashboard() {
               {simulationResults && (
                 <div className="flex flex-col gap-6">
                   
-                  {/* Results numerical summary cards */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-emerald-400 flex flex-col justify-between">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">k-Effective (Combined)</span>
-                      <h4 className="text-2xl font-bold text-slate-100 mt-2">
-                        {simulationResults.k_eff.toFixed(5)}
-                      </h4>
-                      <span className="text-[10px] text-slate-500 mt-1">± {simulationResults.k_eff_std.toFixed(5)} SD</span>
-                    </div>
-
-                    <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-sky-400 flex flex-col justify-between">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reactivity (ρ)</span>
-                      <h4 className="text-2xl font-bold text-slate-100 mt-2">
-                        {simulationResults.reactivity.toFixed(5)}
-                      </h4>
-                      <span className="text-[10px] text-slate-500 mt-1">pcm: {(simulationResults.reactivity * 1e5).toFixed(0)}</span>
-                    </div>
-
-                    <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-purple-400 flex flex-col justify-between">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hot Channel Factor</span>
-                      <h4 className="text-2xl font-bold text-slate-100 mt-2">
-                        {simulationResults.hot_channel_factor.toFixed(3)}
-                      </h4>
-                      <span className="text-[10px] text-slate-500 mt-1">Safe Limit: &lt; 1.5</span>
-                    </div>
-
-                    <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-amber-400 flex flex-col justify-between">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Peak Power Factor</span>
-                      <h4 className="text-2xl font-bold text-slate-100 mt-2">
-                        {simulationResults.peak_power_factor.toFixed(3)}
-                      </h4>
-                      <span className="text-[10px] text-slate-500 mt-1">Max Pin / Average Pin</span>
-                    </div>
+                  {/* Results detailed tab selector */}
+                  <div className="bg-slate-900/40 border border-slate-800/80 rounded-lg p-1 flex flex-wrap gap-1 shadow-inner">
+                    {[
+                      { id: 'core', label: 'Core Performance', icon: BarChart2 },
+                      { id: 'kinetics', label: 'Kinetics & Rod Worth', icon: Cpu },
+                      { id: 'safety', label: 'Safety Coefficients', icon: Shield },
+                      { id: 'flux3d', label: '3D Spatial Mapping', icon: Layers },
+                      { id: 'depletion', label: 'Depletion & Burnup', icon: RefreshCw },
+                      { id: 'economy', label: 'Neutron Economy', icon: Compass },
+                      { id: 'shielding', label: 'Shielding & DPA', icon: Shield }
+                    ].map(tab => {
+                      const Icon = tab.icon;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setResultsTab(tab.id)}
+                          className={`tab-btn ${resultsTab === tab.id ? 'active' : ''}`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          {tab.label}
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  {/* Reaction Rates Stats Panel */}
-                  <div className="panel">
-                    <div className="panel-header">
-                      <h3 className="panel-title"><BarChart2 className="w-4 h-4 text-sky-400" /> Reaction Rates Statistics</h3>
-                      <button 
-                        onClick={exportPDFReport}
-                        className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
-                      >
-                        <FileText className="w-3.5 h-3.5" /> Export PDF Summary
-                      </button>
+                  {/* Core Metrics Tab */}
+                  {resultsTab === 'core' && (
+                    <>
+                      {/* Results numerical summary cards */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-emerald-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">k-Effective (Combined)</span>
+                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
+                            {simulationResults?.k_eff?.toFixed(5) ?? "N/A"}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 mt-1">± {simulationResults?.k_eff_std?.toFixed(5) ?? "N/A"} SD</span>
+                        </div>
+
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-sky-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reactivity (ρ)</span>
+                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
+                            {simulationResults?.reactivity?.toFixed(5) ?? "N/A"}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 mt-1">pcm: {simulationResults?.reactivity !== undefined ? (simulationResults.reactivity * 1e5).toFixed(0) : "N/A"}</span>
+                        </div>
+
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-purple-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hot Channel Factor</span>
+                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
+                            {simulationResults?.hot_channel_factor?.toFixed(3) ?? "N/A"}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 mt-1">Safe Limit: &lt; 1.5</span>
+                        </div>
+
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-amber-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Peak Power Factor</span>
+                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
+                            {simulationResults?.peak_power_factor?.toFixed(3) ?? "N/A"}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 mt-1">Max Pin / Average Pin</span>
+                        </div>
+                      </div>
+
+                      {/* 2D Heatmap & Spectrum Charts */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Fine mesh spatial heatmap */}
+                        {fineMapPlot && (
+                          <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                            <PlotlyChart data={fineMapPlot.data} layout={fineMapPlot.layout} />
+                          </div>
+                        )}
+                        
+                        {/* Energy Spectrum line chart */}
+                        {energySpectrumPlot && (
+                          <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                            <PlotlyChart data={energySpectrumPlot.data} layout={energySpectrumPlot.layout} />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Convergence analysis plots */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Shannon Entropy Plot */}
+                        {entropyPlot && (
+                          <div className="panel bg-[#0e1626]/80 p-4">
+                            <PlotlyChart data={entropyPlot.data} layout={entropyPlot.layout} />
+                          </div>
+                        )}
+
+                        {/* k-eff convergence Plot */}
+                        {keffPlot && (
+                          <div className="panel bg-[#0e1626]/80 p-4">
+                            <PlotlyChart data={keffPlot.data} layout={keffPlot.layout} />
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Kinetics Tab */}
+                  {resultsTab === 'kinetics' && (
+                    <div className="flex flex-col gap-6">
+                      {simulationResults.beta_eff !== undefined && simulationResults.beta_eff > 0 ? (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {/* Beta effective card */}
+                            <div className="panel bg-[#0e1626]/60 border-l-4 border-l-sky-400 p-5 flex flex-col justify-between">
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Delayed Neutron Fraction (&beta;<sub>eff</sub>)</span>
+                              <h4 className="text-3xl font-extrabold text-sky-400 mt-3">
+                                {simulationResults.beta_eff.toFixed(6)}
+                              </h4>
+                              <p className="text-[11px] text-slate-400 mt-2">
+                                Measures reactor dynamic response and margins to prompt criticality. Typical LWR values are 0.005 - 0.007.
+                              </p>
+                            </div>
+
+                            {/* Prompt generation time card */}
+                            <div className="panel bg-[#0e1626]/60 border-l-4 border-l-purple-400 p-5 flex flex-col justify-between">
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Mean Generation Time (&Lambda;<sub>eff</sub>)</span>
+                              <h4 className="text-3xl font-extrabold text-purple-400 mt-3">
+                                {(simulationResults.gen_time * 1e6).toFixed(3)} &mu;s
+                              </h4>
+                              <p className="text-[11px] text-slate-400 mt-2">
+                                Mean time from neutron emission to causing a subsequent fission. Smaller times lead to faster transients.
+                              </p>
+                            </div>
+
+                            {/* Control Rod Worth Card */}
+                            <div className="panel bg-[#0e1626]/60 border-l-4 border-l-amber-400 p-5 flex flex-col justify-between">
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Control Rod Worth</span>
+                              <h4 className="text-3xl font-extrabold text-amber-400 mt-3 font-mono">
+                                {simulationResults.control_rod_worth_pcm !== undefined && simulationResults.control_rod_worth_pcm !== 0 ? `${simulationResults.control_rod_worth_pcm.toFixed(1)} pcm` : 'N/A'}
+                              </h4>
+                              <p className="text-[11px] text-slate-400 mt-2">
+                                Reactivity worth of control rods when moving from current state to the opposite fully-inserted/withdrawn state.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Worth Detailed Comparison Table */}
+                          {simulationResults.control_rod_worth_pcm !== undefined && simulationResults.control_rod_worth_pcm !== 0 && (
+                            <div className="panel">
+                              <div className="panel-header">
+                                <h3 className="panel-title"><Cpu className="w-4 h-4 text-sky-400" /> Control Rod Reactivity Worth Details</h3>
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
+                                      <th className="pb-3 pr-4">Configuration State</th>
+                                      <th className="pb-3 px-4">Eigenvalue (k-eff)</th>
+                                      <th className="pb-3 px-4">Reactivity Worth (&Delta;&rho;)</th>
+                                      <th className="pb-3 pl-4">Safety Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-slate-300 font-mono">
+                                    <tr className="border-b border-slate-900">
+                                      <td className="py-3 pr-4 font-sans font-semibold">Base Config ({params.control_rod_state})</td>
+                                      <td className="py-3 px-4">{simulationResults.k_eff.toFixed(5)} &plusmn; {simulationResults.k_eff_std.toFixed(5)}</td>
+                                      <td className="py-3 px-4">Base</td>
+                                      <td className="py-3 pl-4 font-sans">
+                                        <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-bold">ACTIVE</span>
+                                      </td>
+                                    </tr>
+                                    <tr className="border-b border-slate-900">
+                                      <td className="py-3 pr-4 font-sans font-semibold">Aux Config (Opposite Rod State)</td>
+                                      <td className="py-3 px-4">
+                                        {params.control_rod_state === 'Fully Inserted' 
+                                          ? (simulationResults.k_eff_withdrawn ? simulationResults.k_eff_withdrawn.toFixed(5) : 'N/A')
+                                          : (simulationResults.k_eff_inserted ? simulationResults.k_eff_inserted.toFixed(5) : 'N/A')
+                                        }
+                                      </td>
+                                      <td className="py-3 px-4">
+                                        {simulationResults.control_rod_worth_pcm.toFixed(1)} pcm
+                                      </td>
+                                      <td className="py-3 pl-4 font-sans">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          Math.abs(simulationResults.control_rod_worth_pcm) > 1000 
+                                            ? 'bg-emerald-500/10 text-emerald-400' 
+                                            : 'bg-amber-500/10 text-amber-400'
+                                        }`}>
+                                          {Math.abs(simulationResults.control_rod_worth_pcm) > 1000 ? 'SUFFICIENT WORTH' : 'LOW WORTH'}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="panel bg-[#1a1420] border-amber-500/10 p-8 flex flex-col items-center justify-center text-center gap-4">
+                          <AlertTriangle className="w-12 h-12 text-amber-500" />
+                          <div>
+                            <h4 className="text-lg font-bold text-amber-500">Kinetics Analysis Module Inactive</h4>
+                            <p className="text-xs text-slate-400 mt-2 max-w-lg">
+                              Kinetics parameter calculations require Iterated Fission Probability (IFP) tallies which are not enabled in the current run parameters. To activate, check the <b>Kinetics Parameters</b> module in the <b>Advanced</b> configurator tab and run the simulation again.
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-6 text-center">
-                      <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-900">
-                        <span className="text-[10px] text-slate-400 block mb-1">Fission Rate</span>
-                        <span className="text-sm font-semibold text-emerald-400">{simulationResults.global_fission_rate.toExponential(4)}</span>
+                  )}
+
+                  {/* Safety Coefficients Tab */}
+                  {resultsTab === 'safety' && (
+                    <div className="flex flex-col gap-6">
+                      {simulationResults.safety_coefficients !== undefined ? (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {/* FTC Card */}
+                            <div className="panel bg-[#0e1626]/60 border-l-4 border-l-emerald-400 p-5 flex flex-col justify-between">
+                              <div className="flex justify-between items-start">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Fuel Temp Coefficient (FTC)</span>
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${simulationResults.safety_coefficients.ftc < 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                                  {simulationResults.safety_coefficients.ftc < 0 ? 'Safe / Neg' : 'Danger / Pos'}
+                                </span>
+                              </div>
+                              <h4 className="text-3xl font-extrabold text-slate-100 mt-3">
+                                {simulationResults.safety_coefficients.ftc.toFixed(2)} <span className="text-sm font-normal text-slate-400">pcm/K</span>
+                              </h4>
+                              <p className="text-[11px] text-slate-400 mt-2">
+                                Doppler feedback. Measures absorption resonance broadening. A negative FTC provides inherent stability against fuel overheating.
+                              </p>
+                            </div>
+
+                            {/* MTC Card */}
+                            <div className="panel bg-[#0e1626]/60 border-l-4 border-l-indigo-400 p-5 flex flex-col justify-between">
+                              <div className="flex justify-between items-start">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Moderator Temp Coeff (MTC)</span>
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${simulationResults.safety_coefficients.mtc < 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                                  {simulationResults.safety_coefficients.mtc < 0 ? 'Safe / Neg' : 'Danger / Pos'}
+                                </span>
+                              </div>
+                              <h4 className="text-3xl font-extrabold text-slate-100 mt-3">
+                                {simulationResults.safety_coefficients.mtc.toFixed(2)} <span className="text-sm font-normal text-slate-400">pcm/K</span>
+                              </h4>
+                              <p className="text-[11px] text-slate-400 mt-2">
+                                Coolant temperature feedback. Measures moderator density reduction as coolant warms. Negative MTC ensures stable power control.
+                              </p>
+                            </div>
+
+                            {/* Void Card */}
+                            <div className="panel bg-[#0e1626]/60 border-l-4 border-l-amber-400 p-5 flex flex-col justify-between">
+                              <div className="flex justify-between items-start">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Coolant Void Coefficient</span>
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${simulationResults.safety_coefficients.void < 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                                  {simulationResults.safety_coefficients.void < 0 ? 'Safe / Neg' : 'Danger / Pos'}
+                                </span>
+                              </div>
+                              <h4 className="text-3xl font-extrabold text-slate-100 mt-3">
+                                {simulationResults.safety_coefficients.void.toFixed(2)} <span className="text-sm font-normal text-slate-400">pcm/% void</span>
+                              </h4>
+                              <p className="text-[11px] text-slate-400 mt-2">
+                                Density feedback for steam bubbles/voiding. A negative coefficient prevents power runaway during boiling or coolant depletion.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Detailed Auxiliary Runs Table */}
+                          <div className="panel">
+                            <div className="panel-header">
+                              <h3 className="panel-title"><Cpu className="w-4 h-4 text-sky-400" /> Auxiliary Safety States Analysis</h3>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
+                                    <th className="pb-3 pr-4">Perturbed State</th>
+                                    <th className="pb-3 px-4">Perturbation Details</th>
+                                    <th className="pb-3 px-4">Simulated k-eff</th>
+                                    <th className="pb-3 px-4">Calculated Feedback Coefficient</th>
+                                    <th className="pb-3 pl-4">License Compliance</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="text-slate-300 font-mono">
+                                  <tr className="border-b border-slate-900">
+                                    <td className="py-3 pr-4 font-sans font-semibold">Fuel Doppler (FTC)</td>
+                                    <td className="py-3 px-4">Fuel Temperature +300.0 K</td>
+                                    <td className="py-3 px-4">{simulationResults.safety_coefficients.ftc_k.toFixed(5)}</td>
+                                    <td className="py-3 px-4">{simulationResults.safety_coefficients.ftc.toFixed(2)} pcm/K</td>
+                                    <td className={`py-3 pl-4 font-sans font-bold ${simulationResults.safety_coefficients.ftc < 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {simulationResults.safety_coefficients.ftc < 0 ? 'COMPLIANT (Negative)' : 'NON-COMPLIANT (Positive)'}
+                                    </td>
+                                  </tr>
+                                  <tr className="border-b border-slate-900">
+                                    <td className="py-3 pr-4 font-sans font-semibold">Moderator Heat (MTC)</td>
+                                    <td className="py-3 px-4">Coolant Temperature +20.0 K</td>
+                                    <td className="py-3 px-4">{simulationResults.safety_coefficients.mtc_k.toFixed(5)}</td>
+                                    <td className="py-3 px-4">{simulationResults.safety_coefficients.mtc.toFixed(2)} pcm/K</td>
+                                    <td className={`py-3 pl-4 font-sans font-bold ${simulationResults.safety_coefficients.mtc < 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {simulationResults.safety_coefficients.mtc < 0 ? 'COMPLIANT (Negative)' : 'NON-COMPLIANT (Positive)'}
+                                    </td>
+                                  </tr>
+                                  <tr className="border-b border-slate-900">
+                                    <td className="py-3 pr-4 font-sans font-semibold">Moderator Voiding (Void)</td>
+                                    <td className="py-3 px-4">Coolant Density -10.0% (10% steam)</td>
+                                    <td className="py-3 px-4">{simulationResults.safety_coefficients.void_k.toFixed(5)}</td>
+                                    <td className="py-3 px-4">{simulationResults.safety_coefficients.void.toFixed(2)} pcm/% void</td>
+                                    <td className={`py-3 pl-4 font-sans font-bold ${simulationResults.safety_coefficients.void < 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {simulationResults.safety_coefficients.void < 0 ? 'COMPLIANT (Negative)' : 'NON-COMPLIANT (Positive)'}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="panel bg-[#1a1420] border-amber-500/10 p-8 flex flex-col items-center justify-center text-center gap-4">
+                          <AlertTriangle className="w-12 h-12 text-amber-500" />
+                          <div>
+                            <h4 className="text-lg font-bold text-amber-500">Safety Coefficients Module Inactive</h4>
+                            <p className="text-xs text-slate-400 mt-2 max-w-lg">
+                              Safety coefficient evaluations (FTC, MTC, Void) require 3 additional sequential OpenMC runs simulating perturbed operational states. To activate, check the <b>Safety Coefficients</b> module in the <b>Advanced</b> configurator tab and re-run.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 3D Spatial Mapping Tab */}
+                  {resultsTab === 'flux3d' && (
+                    <div className="flex flex-col gap-6">
+                      {simulationResults.power_3d !== null && simulationResults.power_3d !== undefined ? (
+                        <>
+                          {/* Slider Panel */}
+                          <div className="panel grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                            <div className="flex flex-col gap-2">
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Axial Layer Selection</span>
+                              <div className="flex items-center gap-4">
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="9"
+                                  value={zSliceIndex}
+                                  onChange={(e) => setZSliceIndex(parseInt(e.target.value))}
+                                  className="w-full accent-sky-400 bg-slate-900 border border-slate-800 rounded-lg h-2"
+                                />
+                                <span className="text-sm font-bold font-mono text-sky-400 w-20 text-right">Z - {zSliceIndex + 1} / 10</span>
+                              </div>
+                              <span className="text-[10px] text-slate-500">Axial heights slice from bottom (Z=1) to top (Z=10) of fuel assembly</span>
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Overlay Distribution Type</span>
+                              <div className="overlay-btn-group w-fit">
+                                <button
+                                  onClick={() => setZMapType('power')}
+                                  className={`overlay-btn ${zMapType === 'power' ? 'active' : ''}`}
+                                >
+                                  Fission Power
+                                </button>
+                                <button
+                                  onClick={() => setZMapType('flux')}
+                                  className={`overlay-btn ${zMapType === 'flux' ? 'active' : ''}`}
+                                >
+                                  Neutron Flux
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-900 text-xs text-slate-400">
+                              <span className="font-semibold text-slate-200 block mb-1">Active 3D Tallies:</span>
+                              • Mesh Dimensions: 17x17x10 voxel grid<br/>
+                              • Filters: Axial spatial mesh + Energy-independent
+                            </div>
+                          </div>
+
+                          {/* Graphs */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Slice Heatmap */}
+                            {zSlicePlot && (
+                              <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                                <PlotlyChart data={zSlicePlot.data} layout={zSlicePlot.layout} />
+                              </div>
+                            )}
+
+                            {/* Axial Profile */}
+                            {axialProfilePlot && (
+                              <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                                <PlotlyChart data={axialProfilePlot.data} layout={axialProfilePlot.layout} />
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="panel bg-[#1a1420] border-amber-500/10 p-8 flex flex-col items-center justify-center text-center gap-4">
+                          <AlertTriangle className="w-12 h-12 text-amber-500" />
+                          <div>
+                            <h4 className="text-lg font-bold text-amber-500">3D Spatial Mapping Module Inactive</h4>
+                            <p className="text-xs text-slate-400 mt-2 max-w-lg">
+                              Detailed 3D mesh tallies generate massive data files and are disabled by default. To activate, check the <b>3D Spatial Mesh Mapping</b> module in the <b>Advanced</b> configurator tab and re-run.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Depletion & Burnup Tab */}
+                  {resultsTab === 'depletion' && (
+                    <div className="flex flex-col gap-6">
+                      {simulationResults.depletion !== undefined ? (
+                        <>
+                          {/* Charts */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {depletionKeffPlot && (
+                              <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                                <PlotlyChart data={depletionKeffPlot.data} layout={depletionKeffPlot.layout} />
+                              </div>
+                            )}
+
+                            {depletionIsotopesPlot && (
+                              <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                                <PlotlyChart data={depletionIsotopesPlot.data} layout={depletionIsotopesPlot.layout} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Numerical depletion step table */}
+                          <div className="panel">
+                            <div className="panel-header">
+                              <h3 className="panel-title"><RefreshCw className="w-4 h-4 text-sky-400" /> Depletion Step Concentrations</h3>
+                            </div>
+                            <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider sticky top-0 bg-[#0f172a] z-10 font-sans">
+                                    <th className="pb-3 pr-4">Step (Days)</th>
+                                    <th className="pb-3 px-4">k-Effective</th>
+                                    <th className="pb-3 px-4">U-235 (atoms/b-cm)</th>
+                                    <th className="pb-3 px-4">Xe-135 (atoms/b-cm)</th>
+                                    <th className="pb-3 px-4">Sm-149 (atoms/b-cm)</th>
+                                    <th className="pb-3 pl-4">Pu-239 (atoms/b-cm)</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="text-slate-300 font-mono">
+                                  {simulationResults.depletion.days.map((day, idx) => (
+                                    <tr key={idx} className="border-b border-slate-900 hover:bg-slate-900/30">
+                                      <td className="py-2.5 pr-4 font-sans font-semibold">{day.toFixed(1)} d</td>
+                                      <td className="py-2.5 px-4 font-semibold text-sky-400">{simulationResults.depletion.k_eff[idx].toFixed(5)}</td>
+                                      <td className="py-2.5 px-4">
+                                        {simulationResults.depletion.u235?.[idx] !== undefined 
+                                          ? simulationResults.depletion.u235[idx].toExponential(4) 
+                                          : 'N/A'}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-purple-400">
+                                        {simulationResults.depletion.xe135?.[idx] !== undefined 
+                                          ? simulationResults.depletion.xe135[idx].toExponential(4) 
+                                          : 'N/A'}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-rose-400">
+                                        {simulationResults.depletion.sm149?.[idx] !== undefined 
+                                          ? simulationResults.depletion.sm149[idx].toExponential(4) 
+                                          : 'N/A'}
+                                      </td>
+                                      <td className="py-2.5 pl-4 text-amber-400">
+                                        {simulationResults.depletion.pu239?.[idx] !== undefined 
+                                          ? simulationResults.depletion.pu239[idx].toExponential(4) 
+                                          : 'N/A'}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="panel bg-[#1a1420] border-amber-500/10 p-8 flex flex-col items-center justify-center text-center gap-4">
+                          <AlertTriangle className="w-12 h-12 text-amber-500" />
+                          <div>
+                            <h4 className="text-lg font-bold text-amber-500">Fuel Depletion Analysis Module Inactive</h4>
+                            <p className="text-xs text-slate-400 mt-2 max-w-lg">
+                              Fuel depletion (burnup) simulation requires coupling with decay chains and takes longer due to sub-stepping. To activate, check the <b>Fuel Depletion / Burnup Analysis</b> module in the <b>Advanced</b> configurator tab and re-run.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Neutron Economy Tab */}
+                  {resultsTab === 'economy' && (
+                    <div className="flex flex-col gap-6">
+                      {/* Summary Economy Cards */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Spectral index Card */}
+                        <div className="panel bg-[#0e1626]/60 border-l-4 border-l-sky-400 p-5 flex flex-col justify-between">
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Neutron Spectral Index</span>
+                          <h4 className="text-3xl font-extrabold text-sky-400 mt-3 font-mono">
+                            {simulationResults.spectral_index !== undefined ? simulationResults.spectral_index.toFixed(5) : '0.00000'}
+                          </h4>
+                          <p className="text-[11px] text-slate-400 mt-2">
+                            Fast-to-thermal fission ratio. A value below 0.1 indicates a well-thermalized spectrum typical of PWR assemblies.
+                          </p>
+                          <div className="w-full bg-slate-900 h-2 rounded-full mt-3 overflow-hidden relative border border-slate-800">
+                            <div 
+                              className="bg-sky-400 h-full rounded-full transition-all duration-300"
+                              style={{ width: `${Math.min(100, (simulationResults.spectral_index || 0) * 400)}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-[9px] text-slate-500 mt-1 font-mono">
+                            <span>Thermal (0.0)</span>
+                            <span>Epithermal (0.15)</span>
+                            <span>Fast (&gt;0.25)</span>
+                          </div>
+                        </div>
+
+                        {/* Leakage card */}
+                        <div className="panel bg-[#0e1626]/60 border-l-4 border-l-rose-400 p-5 flex flex-col justify-between">
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Neutron Leakage Fraction</span>
+                          <h4 className="text-3xl font-extrabold text-rose-400 mt-3 font-mono">
+                            {simulationResults.leakage_rate !== undefined ? `${(simulationResults.leakage_rate * 100).toFixed(4)} %` : '0.0000 %'}
+                          </h4>
+                          <p className="text-[11px] text-slate-400 mt-2">
+                            Percentage of neutrons leaking out of boundaries. Requires <b>Vacuum</b> boundary conditions to be non-zero.
+                          </p>
+                          <div className="w-full bg-slate-900 h-2 rounded-full mt-3 overflow-hidden relative border border-slate-800">
+                            <div 
+                              className="bg-rose-400 h-full rounded-full transition-all duration-300"
+                              style={{ width: `${Math.min(100, (simulationResults.leakage_rate || 0) * 100)}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-[9px] text-slate-500 mt-1 font-mono">
+                            <span>0% (Infinite)</span>
+                            <span>5% (High Leakage)</span>
+                            <span>10% (Critical Leak)</span>
+                          </div>
+                        </div>
+
+                        {/* Neutron production proxy card */}
+                        <div className="panel bg-[#0e1626]/60 border-l-4 border-l-emerald-400 p-5 flex flex-col justify-between">
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Fission Reproduction Factor (&eta;)</span>
+                          <h4 className="text-3xl font-extrabold text-emerald-400 mt-3 font-mono">
+                            {simulationResults.global_fission_rate > 0 
+                              ? (simulationResults.global_neutron_production_rate / simulationResults.global_absorption_rate).toFixed(3) 
+                              : '0.000'}
+                          </h4>
+                          <p className="text-[11px] text-slate-400 mt-2">
+                            Average neutrons produced per neutron absorbed in fuel assembly. Must be &gt; 1.0 to sustain chain reactions.
+                          </p>
+                        </div>
                       </div>
-                      <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-900">
-                        <span className="text-[10px] text-slate-400 block mb-1">Absorption Rate</span>
-                        <span className="text-sm font-semibold text-sky-400">{simulationResults.global_absorption_rate.toExponential(4)}</span>
-                      </div>
-                      <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-900">
-                        <span className="text-[10px] text-slate-400 block mb-1">Scattering Rate</span>
-                        <span className="text-sm font-semibold text-slate-300">{simulationResults.global_scatter_rate.toExponential(4)}</span>
-                      </div>
-                      <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-900">
-                        <span className="text-[10px] text-slate-400 block mb-1">(n,2n) Multiplier Rate</span>
-                        <span className="text-sm font-semibold text-purple-400">{simulationResults.global_n2n_rate.toExponential(4)}</span>
-                      </div>
-                      <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-900">
-                        <span className="text-[10px] text-slate-400 block mb-1">Leakage Fraction</span>
-                        <span className="text-sm font-semibold text-amber-400">{simulationResults.leakage_rate.toFixed(5)}</span>
+
+                      {/* Plots */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Neutron balance Pie */}
+                        {neutronBalancePlot && (
+                          <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                            <PlotlyChart data={neutronBalancePlot.data} layout={neutronBalancePlot.layout} />
+                          </div>
+                        )}
+
+                        {/* Reaction rates Bar */}
+                        {reactionRatesBarPlot && (
+                          <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                            <PlotlyChart data={reactionRatesBarPlot.data} layout={reactionRatesBarPlot.layout} />
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  )}
 
-                  {/* 2D Heatmap & Spectrum Charts */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Fine mesh spatial heatmap */}
-                    {fineMapPlot && (
-                      <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
-                        <PlotlyChart data={fineMapPlot.data} layout={fineMapPlot.layout} />
-                      </div>
-                    )}
-                    
-                    {/* Energy Spectrum line chart */}
-                    {energySpectrumPlot && (
-                      <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
-                        <PlotlyChart data={energySpectrumPlot.data} layout={energySpectrumPlot.layout} />
-                      </div>
-                    )}
-                  </div>
+                  {/* Shielding & Dosimetry Tab */}
+                  {resultsTab === 'shielding' && (
+                    <div className="flex flex-col gap-6">
+                      {/* Shielding summary card */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Clad DPA card */}
+                        <div className="panel bg-[#0e1626]/60 border-l-4 border-l-purple-400 p-5 flex flex-col justify-between">
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cladding Damage Energy (DPA Rate proxy)</span>
+                          <h4 className="text-3xl font-extrabold text-purple-400 mt-3 font-mono">
+                            {simulationResults.clad_dpa_rate !== undefined && simulationResults.clad_dpa_rate > 0 
+                              ? simulationResults.clad_dpa_rate.toExponential(4) 
+                              : '0.0000e+0'} <span className="text-sm font-normal text-slate-400">eV/s</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-400 mt-2">
+                            Measures damage energy deposited in the Zircaloy cladding. Used as a proxy for Displacements Per Atom (DPA) to study structural aging and radiation swelling.
+                          </p>
+                        </div>
 
-                  {/* Convergence analysis plots */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Shannon Entropy Plot */}
-                    {entropyPlot && (
-                      <div className="panel bg-[#0e1626]/80 p-4">
-                        <PlotlyChart data={entropyPlot.data} layout={entropyPlot.layout} />
+                        {/* Peak dose card */}
+                        <div className="panel bg-[#0e1626]/60 border-l-4 border-l-amber-400 p-5 flex flex-col justify-between">
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Estimated Peak Biological Dose Rate</span>
+                          <h4 className="text-3xl font-extrabold text-amber-400 mt-3 font-mono">
+                            {simulationResults.dose_rate_map !== undefined 
+                              ? `${Math.max(...simulationResults.dose_rate_map.flat()).toExponential(4)} Sv/h` 
+                              : '0.0000e+0 Sv/h'}
+                          </h4>
+                          <p className="text-[11px] text-slate-400 mt-2">
+                            Peak calculated dose rate just outside the fuel cladding. Scaled from 3-group fluxes using standard ANSI/ANS flux-to-dose conversion factors.
+                          </p>
+                        </div>
                       </div>
-                    )}
 
-                    {/* k-eff convergence Plot */}
-                    {keffPlot && (
-                      <div className="panel bg-[#0e1626]/80 p-4">
-                        <PlotlyChart data={keffPlot.data} layout={keffPlot.layout} />
-                      </div>
-                    )}
-                  </div>
+                      {/* Dose rate Plot */}
+                      {doseRatePlot && (
+                        <div className="grid grid-cols-1 gap-6">
+                          <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                            <PlotlyChart data={doseRatePlot.data} layout={doseRatePlot.layout} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                 </div>
               )}

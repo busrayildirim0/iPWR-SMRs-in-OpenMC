@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <materials>
-  <material id="1" name="Standard_UO2" depletable="true">
+  <material id="1" name="Standard_UO2" depletable="true" volume="12614.876804930602" temperature="900.0">
     <density value="10.42" units="g/cm3"/>
     <nuclide name="U235" wo="0.039665288021772514"/>
     <nuclide name="U238" wo="0.8417855569065056"/>
@@ -75,5 +75,6 @@
     <nuclide name="O16" wo="0.8873023644372998"/>
     <nuclide name="B10" wo="0.0001651994628756593"/>
     <nuclide name="B11" wo="0.0007348005371243405"/>
+    <sab name="c_H_in_H2O"/>
   </material>
 </materials>

@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<settings>
+  <run_mode>eigenvalue</run_mode>
+  <particles>2000</particles>
+  <batches>70</batches>
+  <inactive>20</inactive>
+  <source type="independent" strength="1.0" particle="neutron">
+    <space type="box">
+      <parameters>-10.70864 -10.70864 -100.0 10.70864 10.70864 100.0</parameters>
+    </space>
+    <constraints>
+      <fissionable>true</fissionable>
+    </constraints>
+  </source>
+  <entropy_mesh>1</entropy_mesh>
+  <mesh id="1">
+    <dimension>17 17 1</dimension>
+    <lower_left>-10.70864 -10.70864 -100.0</lower_left>
+    <upper_right>10.70864 10.70864 100.0</upper_right>
+  </mesh>
+  <temperature_method>interpolation</temperature_method>
+</settings>
