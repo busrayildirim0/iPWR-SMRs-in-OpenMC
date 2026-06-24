@@ -1,1 +1,17 @@
-iPWR-SMRs-in-OpenMC/
+# Python cache
+__pycache__/
+*.pyc
+
+# OpenMC / simulation outputs
+runs/
+*.h5
+*.out
+statepoint*
+summary.h5
+tallies.*
+
+# Frontend
+node_modules/
+
+# OS
+.DS_Store

@@ -11,6 +11,10 @@ import time
 import pandas as pd
 import json
 import glob
+import warnings
+
+# Suppress OpenMC auto ID warnings
+warnings.filterwarnings("ignore", message="Another .* instance already exists")
 
 from model_generator import generate_smr_model
 from results_parser import parse_openmc_results
@@ -44,6 +48,9 @@ dataset_generator_state = {
     "job_id": None
 }
 
+import shutil
+import urllib.request
+
 class SimulationParams(BaseModel):
     lattice_type: str = "Square"
     active_height: float = 200.0
@@ -64,6 +71,13 @@ class SimulationParams(BaseModel):
     batches: int = 40
     inactive_batches: int = 10
     temperature: float = 566.5
+    boundary_type: str = "Reflective"
+    kinetics_enabled: bool = False
+    safety_coefs_enabled: bool = False
+    depletion_enabled: bool = False
+    shielding_enabled: bool = False
+    economy_enabled: bool = False
+    flux_3d_enabled: bool = False
 
 class DatasetGenParams(BaseModel):
     enrichment_min: float = 2.0
@@ -81,6 +95,40 @@ class DatasetGenParams(BaseModel):
     # default base settings for other parameters
     base_params: SimulationParams
 
+def download_depletion_chain():
+    chain_path = os.path.join(BACKEND_DIR, "chain_simple.xml")
+    if not os.path.exists(chain_path):
+        url = "https://raw.githubusercontent.com/openmc-dev/openmc-notebooks/develop/chain_simple.xml"
+        print(f"Downloading simple depletion chain from {url} to {chain_path}...")
+        try:
+            urllib.request.urlretrieve(url, chain_path)
+            print("Download completed successfully.")
+        except Exception as e:
+            print(f"Failed to download depletion chain: {e}")
+
+def run_openmc_sync(run_dir):
+    import sys
+    is_linux = sys.platform == 'linux'
+    if is_linux:
+        cmd = ["openmc"]
+        cwd_dir = run_dir
+    else:
+        wsl_run_dir = windows_to_wsl_path(run_dir)
+        cmd = [
+            "wsl", "bash", "-c",
+            f"source /home/busra/miniconda3/bin/activate openmc && "
+            f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
+            f"cd \"{wsl_run_dir}\" && "
+            f"openmc"
+        ]
+        cwd_dir = None
+        
+    env = os.environ.copy()
+    if is_linux:
+        env["OPENMC_CROSS_SECTIONS"] = "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml"
+        
+    subprocess.run(cmd, cwd=cwd_dir, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 def windows_to_wsl_path(win_path):
     win_path = os.path.abspath(win_path)
     drive, path = os.path.splitdrive(win_path)
@@ -94,6 +142,14 @@ def run_simulation_thread(job_id, run_dir, params: SimulationParams):
     jobs[job_id]["logs"] += "Generating OpenMC input files...\n"
     
     try:
+        # Create run directory first
+        os.makedirs(run_dir, exist_ok=True)
+        
+        # Copy depletion chain if enabled
+        if params.depletion_enabled:
+            download_depletion_chain()
+            shutil.copy(os.path.join(BACKEND_DIR, "chain_simple.xml"), os.path.join(run_dir, "chain_simple.xml"))
+
         # 1. Generate XMLs
         offset = generate_smr_model(
             run_dir=run_dir,
@@ -115,7 +171,14 @@ def run_simulation_thread(job_id, run_dir, params: SimulationParams):
             particles=params.particles,
             batches=params.batches,
             inactive_batches=params.inactive_batches,
-            temperature=params.temperature
+            temperature=params.temperature,
+            boundary_type=params.boundary_type,
+            kinetics_enabled=params.kinetics_enabled,
+            safety_coefs_enabled=params.safety_coefs_enabled,
+            depletion_enabled=params.depletion_enabled,
+            shielding_enabled=params.shielding_enabled,
+            economy_enabled=params.economy_enabled,
+            flux_3d_enabled=params.flux_3d_enabled
         )
         
         jobs[job_id]["status"] = "running"
@@ -124,19 +187,53 @@ def run_simulation_thread(job_id, run_dir, params: SimulationParams):
         import sys
         is_linux = sys.platform == 'linux'
         
-        if is_linux:
-            cmd = ["openmc"]
-            cwd_dir = run_dir
+        if params.depletion_enabled:
+            # Write run_depletion.py to run_dir
+            run_depletion_py = os.path.join(run_dir, "run_depletion.py")
+            with open(run_depletion_py, "w") as f:
+                f.write(f"""import openmc
+import openmc.deplete
+
+geometry = openmc.Geometry.from_xml('geometry.xml')
+materials = openmc.Materials.from_xml('materials.xml')
+settings = openmc.Settings.from_xml('settings.xml')
+model = openmc.Model(geometry=geometry, materials=materials, settings=settings)
+
+# 4 time steps of depletion (total 240 days)
+time_steps = [30.0, 30.0, 60.0, 120.0]
+power = 15.0e6
+
+operator = openmc.deplete.CoupledOperator(model, "chain_simple.xml")
+integrator = openmc.deplete.PredictorIntegrator(operator, time_steps, power, power_density=None)
+integrator.integrate()
+""")
+            if is_linux:
+                cmd = ["python3", "run_depletion.py"]
+                cwd_dir = run_dir
+            else:
+                wsl_run_dir = windows_to_wsl_path(run_dir)
+                cmd = [
+                    "wsl", "bash", "-c",
+                    f"source /home/busra/miniconda3/bin/activate openmc && "
+                    f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
+                    f"cd \"{wsl_run_dir}\" && "
+                    f"python3 run_depletion.py"
+                ]
+                cwd_dir = None
         else:
-            wsl_run_dir = windows_to_wsl_path(run_dir)
-            cmd = [
-                "wsl", "bash", "-c",
-                f"source /home/busra/miniconda3/bin/activate openmc && "
-                f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
-                f"cd \"{wsl_run_dir}\" && "
-                f"openmc"
-            ]
-            cwd_dir = None
+            if is_linux:
+                cmd = ["openmc"]
+                cwd_dir = run_dir
+            else:
+                wsl_run_dir = windows_to_wsl_path(run_dir)
+                cmd = [
+                    "wsl", "bash", "-c",
+                    f"source /home/busra/miniconda3/bin/activate openmc && "
+                    f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
+                    f"cd \"{wsl_run_dir}\" && "
+                    f"openmc"
+                ]
+                cwd_dir = None
             
         env = os.environ.copy()
         if is_linux:
@@ -170,6 +267,173 @@ def run_simulation_thread(job_id, run_dir, params: SimulationParams):
         # 2. Parse Statepoint
         results = parse_openmc_results(run_dir, params.lattice_type)
         results["offset"] = offset # Pass offset for visualization boundaries
+        
+        k_base = results["k_eff"]
+        
+        # 3. Control Rod Worth auxiliary run
+        if params.kinetics_enabled:
+            jobs[job_id]["logs"] += "\nRunning auxiliary simulation for Control Rod Worth...\n"
+            inserted_dir = os.path.join(run_dir, "inserted")
+            target_state = "Fully Inserted" if params.control_rod_state != "Fully Inserted" else "Fully Withdrawn"
+            generate_smr_model(
+                run_dir=inserted_dir,
+                lattice_type=params.lattice_type,
+                active_height=params.active_height,
+                pin_pitch=params.pin_pitch,
+                fuel_radius=params.fuel_radius,
+                gap_radius=params.gap_radius,
+                clad_radius=params.clad_radius,
+                gt_inner_radius=params.gt_inner_radius,
+                gt_outer_radius=params.gt_outer_radius,
+                enrichment=params.enrichment,
+                soluble_boron=params.soluble_boron,
+                clad_material=params.clad_material,
+                poison_enabled=params.poison_enabled,
+                poison_fraction=params.poison_fraction,
+                control_rod_state=target_state,
+                control_rod_material=params.control_rod_material,
+                particles=2000,
+                batches=20,
+                inactive_batches=5,
+                temperature=params.temperature,
+                boundary_type=params.boundary_type
+            )
+            run_openmc_sync(inserted_dir)
+            try:
+                res_alt = parse_openmc_results(inserted_dir, params.lattice_type)
+                k_alt = res_alt["k_eff"]
+                
+                if params.control_rod_state != "Fully Inserted":
+                    k_out, k_in = k_base, k_alt
+                else:
+                    k_out, k_in = k_alt, k_base
+                    
+                delta_rho = (k_out - k_in) / (k_out * k_in) if (k_out * k_in) > 0 else 0.0
+                results["control_rod_worth_pcm"] = delta_rho * 1e5
+                results["k_eff_inserted"] = k_in
+                results["k_eff_withdrawn"] = k_out
+            except Exception as e:
+                print(f"Error calculating rod worth: {e}")
+                results["control_rod_worth_pcm"] = 0.0
+                
+        # 4. Safety Coefficients auxiliary runs
+        if params.safety_coefs_enabled:
+            jobs[job_id]["logs"] += "\nRunning auxiliary simulations for Safety Coefficients (FTC, MTC, Void)...\n"
+            
+            # FTC
+            ftc_dir = os.path.join(run_dir, "ftc")
+            generate_smr_model(
+                run_dir=ftc_dir,
+                lattice_type=params.lattice_type,
+                active_height=params.active_height,
+                pin_pitch=params.pin_pitch,
+                fuel_radius=params.fuel_radius,
+                gap_radius=params.gap_radius,
+                clad_radius=params.clad_radius,
+                gt_inner_radius=params.gt_inner_radius,
+                gt_outer_radius=params.gt_outer_radius,
+                enrichment=params.enrichment,
+                soluble_boron=params.soluble_boron,
+                clad_material=params.clad_material,
+                poison_enabled=params.poison_enabled,
+                poison_fraction=params.poison_fraction,
+                control_rod_state=params.control_rod_state,
+                control_rod_material=params.control_rod_material,
+                particles=2000,
+                batches=20,
+                inactive_batches=5,
+                temperature=params.temperature,
+                fuel_temperature=params.temperature + 300.0, # fuel temp increased by 300K
+                boundary_type=params.boundary_type
+            )
+            run_openmc_sync(ftc_dir)
+            k_ftc = 0.0
+            try:
+                res_ftc = parse_openmc_results(ftc_dir, params.lattice_type)
+                k_ftc = res_ftc["k_eff"]
+            except Exception as e:
+                print(f"Error in FTC run: {e}")
+                
+            # MTC
+            mtc_dir = os.path.join(run_dir, "mtc")
+            generate_smr_model(
+                run_dir=mtc_dir,
+                lattice_type=params.lattice_type,
+                active_height=params.active_height,
+                pin_pitch=params.pin_pitch,
+                fuel_radius=params.fuel_radius,
+                gap_radius=params.gap_radius,
+                clad_radius=params.clad_radius,
+                gt_inner_radius=params.gt_inner_radius,
+                gt_outer_radius=params.gt_outer_radius,
+                enrichment=params.enrichment,
+                soluble_boron=params.soluble_boron,
+                clad_material=params.clad_material,
+                poison_enabled=params.poison_enabled,
+                poison_fraction=params.poison_fraction,
+                control_rod_state=params.control_rod_state,
+                control_rod_material=params.control_rod_material,
+                particles=2000,
+                batches=20,
+                inactive_batches=5,
+                temperature=params.temperature + 20.0, # coolant temp increased by 20K
+                boundary_type=params.boundary_type
+            )
+            run_openmc_sync(mtc_dir)
+            k_mtc = 0.0
+            try:
+                res_mtc = parse_openmc_results(mtc_dir, params.lattice_type)
+                k_mtc = res_mtc["k_eff"]
+            except Exception as e:
+                print(f"Error in MTC run: {e}")
+                
+            # Void
+            void_dir = os.path.join(run_dir, "void")
+            generate_smr_model(
+                run_dir=void_dir,
+                lattice_type=params.lattice_type,
+                active_height=params.active_height,
+                pin_pitch=params.pin_pitch,
+                fuel_radius=params.fuel_radius,
+                gap_radius=params.gap_radius,
+                clad_radius=params.clad_radius,
+                gt_inner_radius=params.gt_inner_radius,
+                gt_outer_radius=params.gt_outer_radius,
+                enrichment=params.enrichment,
+                soluble_boron=params.soluble_boron,
+                clad_material=params.clad_material,
+                poison_enabled=params.poison_enabled,
+                poison_fraction=params.poison_fraction,
+                control_rod_state=params.control_rod_state,
+                control_rod_material=params.control_rod_material,
+                particles=2000,
+                batches=20,
+                inactive_batches=5,
+                temperature=params.temperature,
+                boundary_type=params.boundary_type,
+                void_fraction=0.10 # 10% void
+            )
+            run_openmc_sync(void_dir)
+            k_void = 0.0
+            try:
+                res_void = parse_openmc_results(void_dir, params.lattice_type)
+                k_void = res_void["k_eff"]
+            except Exception as e:
+                print(f"Error in Void run: {e}")
+                
+            # Calculate coefficients
+            ftc_val = ((k_ftc - k_base) / (k_ftc * k_base * 300.0)) * 1e5 if (k_ftc * k_base) > 0 else 0.0
+            mtc_val = ((k_mtc - k_base) / (k_mtc * k_base * 20.0)) * 1e5 if (k_mtc * k_base) > 0 else 0.0
+            void_val = ((k_void - k_base) / (k_void * k_base * 10.0)) * 1e5 if (k_void * k_base) > 0 else 0.0
+            
+            results["safety_coefficients"] = {
+                "ftc": ftc_val,
+                "mtc": mtc_val,
+                "void": void_val,
+                "ftc_k": k_ftc,
+                "mtc_k": k_mtc,
+                "void_k": k_void
+            }
         
         jobs[job_id]["results"] = results
         jobs[job_id]["status"] = "completed"
@@ -505,4 +769,4 @@ def serve_catchall(catchall: str):
 if __name__ == "__main__":
     import uvicorn
     # Bind to 0.0.0.0 to make it accessible outside WSL
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

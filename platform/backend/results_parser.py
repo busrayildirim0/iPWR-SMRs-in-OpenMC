@@ -1,7 +1,13 @@
+# pyrefly: ignore [missing-import]
 import openmc
+import openmc.deplete
 import numpy as np
 import glob
 import os
+import warnings
+
+# Suppress OpenMC auto ID warnings during statepoint deserialization
+warnings.filterwarnings("ignore", message="Another .* instance already exists")
 
 def parse_openmc_results(run_dir, lattice_type="Square"):
     print(f"Parsing OpenMC results in {run_dir}...")
@@ -17,6 +23,7 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
     print(f"Loading statepoint: {latest_sp}")
     
     results = {}
+    grid_res = 17 if lattice_type == "Square" else 15
     
     with openmc.StatePoint(latest_sp) as sp:
         # Core performance metrics
@@ -37,10 +44,21 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
         entropy_val = sp.entropy
         results['shannon_entropy'] = [float(e) for e in entropy_val]
         
-        # Batch-by-batch k-effective values
-        k_gen = sp.k_generation
+        # Batch-by-batch k-effective values (only active batches)
+        inactive = sp.n_inactive
+        k_gen = sp.k_generation[inactive:]
         results['batch_keff'] = [float(k) for k in k_gen]
         
+        # Kinetics parameters
+        try:
+            ifp_param = sp.get_kinetics_parameters()
+            results['beta_eff'] = float(ifp_param.beta_effective)
+            results['gen_time'] = float(ifp_param.generation_time)
+        except Exception as e:
+            print(f"Kinetics parameters not found or failed: {e}")
+            results['beta_eff'] = 0.0
+            results['gen_time'] = 0.0
+            
         # 2. Parse Global Reactions
         try:
             rx_tally = sp.get_tally(name='Global_Reactions')
@@ -63,14 +81,33 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
             results['global_neutron_production_rate'] = 0.0
             
         # Leakage rate
-        # In reflective boundaries, leakage is 0. But let's check if the statepoint summary lists leakage.
-        # OpenMC statepoint has sp.k_generation, but does not expose leakage directly as a simple attribute.
-        # We can extract leakage from the output, or mock/set it if boundaries are reflective/vacuum.
-        # Let's see: we can look at the summary file if it exists, or just set it to 0.0 if reflective boundary is detected.
-        results['leakage_rate'] = 0.0
-        
+        try:
+            leakage_tally = sp.get_tally(name='External_Leakage')
+            leakage_val = float(np.sum(np.abs(leakage_tally.get_slice(scores=['current']).mean)))
+            results['leakage_rate'] = leakage_val
+        except Exception as e:
+            print(f"Leakage parsing failed: {e}")
+            results['leakage_rate'] = 0.0
+            
+        # Clad DPA (damage energy tally proxy)
+        try:
+            dpa_tally = sp.get_tally(name='Clad_DPA')
+            dpa_val = float(dpa_tally.get_slice(scores=['damage-energy']).mean.sum())
+            results['clad_dpa_rate'] = dpa_val
+        except:
+            results['clad_dpa_rate'] = 0.0
+            
+        # Spectral index (fast / thermal fission index)
+        try:
+            spec_fally = sp.get_tally(name='Fission_Energy_Tally')
+            fiss_energy = spec_fally.mean.flatten()
+            thermal_fiss = float(fiss_energy[0])
+            fast_fiss = float(fiss_energy[2])
+            results['spectral_index'] = fast_fiss / thermal_fiss if thermal_fiss > 0 else 0.0
+        except Exception as e:
+            results['spectral_index'] = 0.0
+            
         # 3. Parse Pin-by-pin Power Map (kappa-fission)
-        grid_res = 17 if lattice_type == "Square" else 15
         try:
             pin_tally = sp.get_tally(name='Pin_Tally')
             power_data = pin_tally.get_slice(scores=['kappa-fission']).mean
@@ -139,13 +176,7 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
         # 5. Parse Group-wise Fluxes (Thermal, Epithermal, Fast)
         try:
             group_tally = sp.get_tally(name='Group_Flux_Tally')
-            # 3 energy groups from filter: Group 1 (<0.625 eV), Group 2 (0.625 eV to 100 keV), Group 3 (>100 keV)
-            # In OpenMC, slicing an energy filter will yield a slice per bin
-            # Index 0: Thermal, Index 1: Epithermal, Index 2: Fast
-            # Slice syntax in openmc: get_slice(filters=[openmc.EnergyFilter], filter_bins=[(low, high)])
-            # Or we can reshape the mean array: shape is (170, 170, 3) or similar depending on filter order
             mean_array = group_tally.mean
-            # Reshape it to (170, 170, 3)
             reshaped_group = mean_array.reshape((170, 170, 3))
             
             thermal_flux = np.flipud(reshaped_group[:, :, 0])
@@ -155,23 +186,24 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
             results['thermal_flux_map'] = [[float(v) for v in row] for row in thermal_flux]
             results['epithermal_flux_map'] = [[float(v) for v in row] for row in epithermal_flux]
             results['fast_flux_map'] = [[float(v) for v in row] for row in fast_flux]
+            
+            # Calculate representative biological dose rate map (Sv/h)
+            dose_map = (1.0e-10 * thermal_flux) + (1.0e-9 * epithermal_flux) + (1.0e-8 * fast_flux)
+            results['dose_rate_map'] = [[float(v) for v in row] for row in dose_map]
         except Exception as e:
             print(f"Error parsing Group Flux Tallies: {e}")
             results['thermal_flux_map'] = [[0.0] * 170] * 170
             results['epithermal_flux_map'] = [[0.0] * 170] * 170
             results['fast_flux_map'] = [[0.0] * 170] * 170
+            results['dose_rate_map'] = [[0.0] * 170] * 170
             
         # 6. Parse Energy Spectrum
         try:
             spec_tally = sp.get_tally(name='Energy_Spectrum_Tally')
             spec_data = spec_tally.mean.flatten()
-            
-            # The energy filter has 500 bins (501 boundaries)
-            # Retrieve energy filter boundaries from the tally
             e_filter = spec_tally.filters[0]
             e_bins = e_filter.bins
             
-            # Calculate center points for the energy graph
             centers = []
             for i in range(len(e_bins) - 1):
                 low = e_bins[i][0]
@@ -184,6 +216,65 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
             print(f"Error parsing Energy Spectrum Tally: {e}")
             results['energy_spectrum_centers'] = []
             results['energy_spectrum_flux'] = []
+            
+        # 7. Parse 3D Tallies if exists
+        try:
+            tally_3d = sp.get_tally(name='3D_Flux_Power')
+            flux_3d_data = tally_3d.get_slice(scores=['flux']).mean
+            power_3d_data = tally_3d.get_slice(scores=['kappa-fission']).mean
+            
+            flux_3d = flux_3d_data.reshape((grid_res, grid_res, 10))
+            power_3d = power_3d_data.reshape((grid_res, grid_res, 10))
+            
+            results['flux_3d'] = [[[float(v) for v in row] for row in np.flipud(flux_3d[:, :, z])] for z in range(10)]
+            results['power_3d'] = [[[float(v) for v in row] for row in np.flipud(power_3d[:, :, z])] for z in range(10)]
+        except Exception as e:
+            results['flux_3d'] = None
+            results['power_3d'] = None
+            
+    # 8. Parse Depletion results if depletion_results.h5 exists
+    depletion_h5 = os.path.join(run_dir, 'depletion_results.h5')
+    if os.path.exists(depletion_h5):
+        try:
+            deplete_res = openmc.deplete.Results(depletion_h5)
+            time_steps, k_eff_series = deplete_res.get_eigenvalue()
+            days = [t / (24 * 3600) for t in time_steps]
+            
+            # Find fuel material ID
+            materials = openmc.Materials.from_xml(os.path.join(run_dir, 'materials.xml'))
+            fuel_mat_id = None
+            for m in materials:
+                if 'UO2' in m.name:
+                    fuel_mat_id = str(m.id)
+                    break
+            
+            xe135_series = []
+            sm149_series = []
+            pu239_series = []
+            u235_series = []
+            
+            if fuel_mat_id:
+                _, xe135_atoms = deplete_res.get_atoms(fuel_mat_id, "Xe135")
+                _, sm149_atoms = deplete_res.get_atoms(fuel_mat_id, "Sm149")
+                _, pu239_atoms = deplete_res.get_atoms(fuel_mat_id, "Pu239")
+                _, u235_atoms = deplete_res.get_atoms(fuel_mat_id, "U235")
+                
+                xe135_series = [float(v) for v in xe135_atoms]
+                sm149_series = [float(v) for v in sm149_atoms]
+                pu239_series = [float(v) for v in pu239_atoms]
+                u235_series = [float(v) for v in u235_atoms]
+                
+            results['depletion'] = {
+                'days': [float(d) for d in days],
+                'k_eff': [float(k[0]) for k in k_eff_series],
+                'k_eff_std': [float(k[1]) for k in k_eff_series],
+                'xe135': xe135_series,
+                'sm149': sm149_series,
+                'pu239': pu239_series,
+                'u235': u235_series
+            }
+        except Exception as e:
+            print(f"Error parsing depletion results: {e}")
             
     print("Parsing completed successfully!")
     return results

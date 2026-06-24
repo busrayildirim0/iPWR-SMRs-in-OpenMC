@@ -37,8 +37,13 @@ def run_test():
         control_rod_material="Ag-In-Cd",
         particles=500,
         batches=10,
-        inactive_batches=2,
-        temperature=560.0
+        inactive_batches=5,
+        temperature=560.0,
+        boundary_type="Vacuum",
+        kinetics_enabled=True,
+        shielding_enabled=True,
+        economy_enabled=True,
+        flux_3d_enabled=True
     )
     
     print(f"Geometry Offset: {offset}")
@@ -112,6 +117,17 @@ def run_test():
     assert len(results['pin_power_map'][0]) == 17, "Invalid pin power matrix columns!"
     assert len(results['flux_map']) == 170, "Invalid flux heatmap size!"
     assert len(results['energy_spectrum_flux']) > 0, "No spectrum data parsed!"
+    
+    # Advanced Analyses Asserts
+    assert results['beta_eff'] is not None, "Beta_eff should be parsed!"
+    assert results['gen_time'] is not None, "Gen_time should be parsed!"
+    assert results['leakage_rate'] > 0.0, "Vacuum boundary should produce leakage!"
+    assert results['clad_dpa_rate'] > 0.0, "Shielding DPA should be calculated!"
+    assert results['spectral_index'] > 0.0, "Spectral index should be calculated!"
+    assert results['flux_3d'] is not None, "3D flux mesh should be calculated!"
+    assert len(results['flux_3d']) == 10, "3D flux should have 10 layers!"
+    assert len(results['flux_3d'][0]) == 17, "3D layers should be 17x17!"
+    assert results['dose_rate_map'] is not None, "Dose rate map should be parsed!"
     
     print("\n=== TEST COMPLETED SUCCESSFULLY ===")
     

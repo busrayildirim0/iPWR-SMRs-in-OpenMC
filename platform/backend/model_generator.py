@@ -2,6 +2,12 @@ import openmc
 import openmc.model
 import math
 import os
+import numpy as np
+import warnings
+
+# Suppress OpenMC auto ID warnings to prevent log clutter
+warnings.filterwarnings("ignore", message="Another .* instance already exists")
+
 
 def generate_smr_model(
     run_dir,
@@ -23,9 +29,18 @@ def generate_smr_model(
     particles=10000,               # Number of simulation particles
     batches=50,                    # Number of batches
     inactive_batches=10,           # Number of inactive batches
-    temperature=566.5              # Coolant temperature in K
+    temperature=566.5,             # Coolant temperature in K
+    boundary_type="Reflective",    # "Reflective" or "Vacuum"
+    fuel_temperature=900.0,        # Fuel temperature in K (for FTC/Doppler feedback)
+    kinetics_enabled=False,        # Calculate Beta_eff / kinetics
+    safety_coefs_enabled=False,    # Safety coefficients calculation (MTC, FTC, Void)
+    depletion_enabled=False,       # Depletion/Burnup run flag
+    shielding_enabled=False,       # Dose mapping & Vessel/Clad damage DPA
+    economy_enabled=False,         # Detailed neutron economy & reaction rates
+    flux_3d_enabled=False,         # Enable 3D mesh tallies
+    void_fraction=0.0              # Void fraction mult (e.g. 0.1 for 10% void)
 ):
-    print(f"Generating SMR Model in {run_dir}...")
+    print(f"Generating SMR Model in {run_dir} (Boundary: {boundary_type}, Kinetics: {kinetics_enabled}, Depletion: {depletion_enabled})...")
     os.makedirs(run_dir, exist_ok=True)
     
     # Reset auto IDs to avoid conflicts across runs
@@ -38,6 +53,7 @@ def generate_smr_model(
     # Standard UO2 Fuel Material
     fuel = openmc.Material(name='Standard_UO2')
     fuel.set_density('g/cm3', 10.42)
+    fuel.temperature = fuel_temperature
     m_u = enrichment_fraction * 235.043 + (1.0 - enrichment_fraction) * 238.0507
     m_o2 = 2.0 * 15.999
     m_uo2 = m_u + m_o2
@@ -53,6 +69,7 @@ def generate_smr_model(
         
         poison_fuel = openmc.Material(name='Poisoned_UO2_Gd2O3')
         poison_fuel.set_density('g/cm3', 10.1) # typical mixed density
+        poison_fuel.temperature = fuel_temperature
         # Add UO2 components scaled by uo2_frac
         poison_fuel.add_nuclide('U235', enrichment_fraction * (m_u / m_uo2) * uo2_frac, 'wo')
         poison_fuel.add_nuclide('U238', (1.0 - enrichment_fraction) * (m_u / m_uo2) * uo2_frac, 'wo')
@@ -127,8 +144,12 @@ def generate_smr_model(
         density = max(0.1, d_ref - 0.0015 * (temperature - t_ref))
     else:
         density = d_ref
+    density = density * (1.0 - void_fraction)
     water.set_density('g/cm3', density)
     water.temperature = temperature
+    
+    # Enable S(alpha, beta) thermal scattering
+    water.add_s_alpha_beta('c_H_in_H2O')
     
     boron_wt = (soluble_boron * 1e-6)
     water_wt = 1.0 - boron_wt
@@ -138,6 +159,24 @@ def generate_smr_model(
     water.add_element('B', boron_wt, 'wo')
     materials_list.append(water)
     
+    # Determine the number of standard and poisoned fuel pins to compute volumes for depletion
+    if lattice_type == "Square":
+        if poison_enabled:
+            n_fuel = 244
+            n_poison = 20
+        else:
+            n_fuel = 264
+            n_poison = 0
+    else: # Hexagonal
+        n_fuel = 108
+        n_poison = 0
+
+    # Calculate and assign fuel volumes
+    pin_volume = math.pi * (fuel_radius ** 2) * active_height
+    fuel.volume = n_fuel * pin_volume
+    if poison_enabled and n_poison > 0:
+        poison_fuel.volume = n_poison * pin_volume
+
     # Export materials to XML in target directory
     materials = openmc.Materials(materials_list)
     materials.export_to_xml(os.path.join(run_dir, 'materials.xml'))
@@ -188,17 +227,10 @@ def generate_smr_model(
     C = openmc.Universe(cells=[c_c1, c_c2, c_c3, c_c4, c_c5, c_c6])
     
     # Determine what goes inside guide tubes depending on Control Rod State
-    # For a fully withdrawn state, guide tubes are empty (water filled).
-    # For a fully inserted state, guide tubes are filled with control rod.
-    # For partially inserted, we can model it via Z axial coordinates.
-    # But since we support 2D assembly/reflective geometry, we can set the lattice universe.
     if control_rod_state == "Fully Inserted":
         X = C
     elif control_rod_state == "Partially Inserted":
-        # In 2D, partially inserted can be approximated by inserting control rods in half the tubes,
-        # or we will build a 3D geometry where Z is split into two regions:
-        # bottom region is water-filled guide tubes, top region has control rods inserted.
-        X = C
+        X = G  # Base 2D lattice defaults to withdrawn (G); axial splitting handles insertion in 3D geometry
     else: # Fully Withdrawn
         X = G
         
@@ -212,10 +244,6 @@ def generate_smr_model(
         lattice.pitch = (pin_pitch, pin_pitch)
         lattice.lower_left = (-offset, -offset)
         
-        # Symmetrical distribution of guide tubes and instrumentation tubes
-        # X: Control Rod or Empty Guide Tube (based on rod state)
-        # P: Burnable poison rods
-        # G: Always empty guide tube / central instrument
         lattice.universes = [
             [F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F],
             [F, P, F, P, F, F, P, F, F, F, P, F, F, P, F, P, F],
@@ -237,17 +265,19 @@ def generate_smr_model(
         ]
         lattice.outer = openmc.Universe(cells=[openmc.Cell(fill=water)])
         
-        min_x = openmc.XPlane(x0=-offset, boundary_type='reflective')
-        max_x = openmc.XPlane(x0=offset, boundary_type='reflective')
-        min_y = openmc.YPlane(y0=-offset, boundary_type='reflective')
-        max_y = openmc.YPlane(y0=offset, boundary_type='reflective')
+        boundary_cond = "vacuum" if boundary_type.lower() == "vacuum" else "reflective"
+        min_x = openmc.XPlane(x0=-offset, boundary_type=boundary_cond)
+        max_x = openmc.XPlane(x0=offset, boundary_type=boundary_cond)
+        min_y = openmc.YPlane(y0=-offset, boundary_type=boundary_cond)
+        max_y = openmc.YPlane(y0=offset, boundary_type=boundary_cond)
         region_box = +min_x & -max_x & +min_y & -max_y
         
     else: # Hexagonal
         # CAREM-25 layout (127-pin)
         offset = 6.5 * pin_pitch
         edge_len = (offset * 2) / math.sqrt(3)
-        hex_prism = openmc.model.HexagonalPrism(orientation='y', edge_length=edge_len, boundary_type='reflective')
+        boundary_cond = "vacuum" if boundary_type.lower() == "vacuum" else "reflective"
+        hex_prism = openmc.model.HexagonalPrism(orientation='y', edge_length=edge_len, boundary_type=boundary_cond)
         region_box = -hex_prism
         
         # rings from outside-in (ring7 to ring1)
@@ -276,9 +306,7 @@ def generate_smr_model(
         mid_z = openmc.ZPlane(z0=0.0)
         
         # Build two lattices: top lattice (with C) and bottom lattice (with G)
-        # Top Lattice: Control Rods (C) inserted in X
         top_X = C
-        # Bottom Lattice: Control Rods withdrawn (G) in X
         bottom_X = G
         
         # Top Lattice definition
@@ -361,6 +389,9 @@ def generate_smr_model(
     settings.particles = particles
     settings.temperature = {'method': 'interpolation'}
     
+    if kinetics_enabled:
+        settings.ifp_n_generation = min(10, inactive_batches)
+    
     # Shannon entropy mesh for source convergence checks
     entropy_mesh = openmc.RegularMesh()
     if lattice_type == "Square":
@@ -424,8 +455,13 @@ def generate_smr_model(
     group_tally.scores = ['flux']
     tallies_list.append(group_tally)
     
+    # Spectral Index Fission rates tally
+    spec_fission_tally = openmc.Tally(name='Fission_Energy_Tally')
+    spec_fission_tally.filters = [energy_filter]
+    spec_fission_tally.scores = ['fission']
+    tallies_list.append(spec_fission_tally)
+    
     # Fine Energy Spectrum Tally (500 logarithmic bins)
-    import numpy as np
     energy_bins = np.logspace(-5, 7.3, 500)
     # OpenMC expects custom list for energy bins
     e_filter = openmc.EnergyFilter(energy_bins)
@@ -434,6 +470,35 @@ def generate_smr_model(
     spec_tally.filters = [e_filter]
     spec_tally.scores = ['flux']
     tallies_list.append(spec_tally)
+    
+    # Cladding DPA Tally if shielding enabled
+    if shielding_enabled:
+        dpa_tally = openmc.Tally(name='Clad_DPA')
+        dpa_tally.filters = [openmc.MaterialFilter(clad)]
+        dpa_tally.scores = ['damage-energy']
+        tallies_list.append(dpa_tally)
+        
+    # 3D Power & Flux Tally if enabled
+    if flux_3d_enabled:
+        mesh_3d = openmc.RegularMesh()
+        mesh_3d.dimension = [grid_res, grid_res, 10]
+        mesh_3d.lower_left = [-offset, -offset, -z_half]
+        mesh_3d.upper_right = [offset, offset, z_half]
+        
+        tally_3d = openmc.Tally(name='3D_Flux_Power')
+        tally_3d.filters = [openmc.MeshFilter(mesh_3d)]
+        tally_3d.scores = ['flux', 'kappa-fission']
+        tallies_list.append(tally_3d)
+        
+    # Leakage tally if vacuum boundaries
+    if boundary_type.lower() == "vacuum":
+        leakage_tally = openmc.Tally(name='External_Leakage')
+        leakage_tally.filters = [openmc.SurfaceFilter([min_x, max_x, min_y, max_y])]
+        leakage_tally.scores = ['current']
+        tallies_list.append(leakage_tally)
+        
+    # IFP Kinetics does not require extra tallies in OpenMC when settings.ifp_n_generation is configured.
+
     
     # Export tallies
     tallies = openmc.Tallies(tallies_list)
