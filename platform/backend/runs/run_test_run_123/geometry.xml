@@ -1,0 +1,47 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<geometry>
+  <cell id="1" material="1" region="-1" universe="1"/>
+  <cell id="2" material="3" region="1 -2" universe="1"/>
+  <cell id="3" material="2" region="2 -3" universe="1"/>
+  <cell id="4" material="6" region="3" universe="1"/>
+  <cell id="5" material="6" region="-4" universe="2"/>
+  <cell id="6" material="2" region="4 -5" universe="2"/>
+  <cell id="7" material="6" region="5" universe="2"/>
+  <cell id="14" material="6" universe="5"/>
+  <cell id="15" fill="4" region="9 -10 11 -12 13 -14" universe="6"/>
+  <lattice id="4">
+    <pitch>1.26 1.26</pitch>
+    <outer>5</outer>
+    <dimension>17 17</dimension>
+    <lower_left>-10.71 -10.71</lower_left>
+    <universes>
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 1 1 1 2 1 1 2 1 1 2 1 1 1 1 1 
+1 1 1 2 1 1 1 1 1 1 1 1 1 2 1 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 2 1 1 2 1 1 2 1 1 2 1 1 2 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 2 1 1 2 1 1 2 1 1 2 1 1 2 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 2 1 1 2 1 1 2 1 1 2 1 1 2 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 1 2 1 1 1 1 1 1 1 1 1 2 1 1 1 
+1 1 1 1 1 2 1 1 2 1 1 2 1 1 1 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 </universes>
+  </lattice>
+  <surface id="1" type="z-cylinder" coeffs="0.0 0.0 0.39"/>
+  <surface id="2" type="z-cylinder" coeffs="0.0 0.0 0.4"/>
+  <surface id="3" type="z-cylinder" coeffs="0.0 0.0 0.45"/>
+  <surface id="4" type="z-cylinder" coeffs="0.0 0.0 0.56"/>
+  <surface id="5" type="z-cylinder" coeffs="0.0 0.0 0.6"/>
+  <surface id="9" type="x-plane" boundary="reflective" coeffs="-10.71"/>
+  <surface id="10" type="x-plane" boundary="reflective" coeffs="10.71"/>
+  <surface id="11" type="y-plane" boundary="reflective" coeffs="-10.71"/>
+  <surface id="12" type="y-plane" boundary="reflective" coeffs="10.71"/>
+  <surface id="13" type="z-plane" boundary="reflective" coeffs="-50.0"/>
+  <surface id="14" type="z-plane" boundary="reflective" coeffs="50.0"/>
+</geometry>
