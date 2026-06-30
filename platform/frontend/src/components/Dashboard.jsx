@@ -1963,12 +1963,12 @@ export default function Dashboard() {
                         <>
                           <div className="flex justify-between text-[11px] text-slate-500">
                             <span>Completed: {datasetStatus.completed_cases} / {datasetStatus.total_cases}</span>
-                            <span>{((datasetStatus.completed_cases / datasetStatus.total_cases) * 100).toFixed(0)}%</span>
+                            <span>{datasetStatus.total_cases > 0 ? ((datasetStatus.completed_cases / datasetStatus.total_cases) * 100).toFixed(0) : 0}%</span>
                           </div>
                           <div className="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden">
                             <div 
                               className="bg-sky-400 h-full rounded-full transition-all duration-500" 
-                              style={{ width: `${(datasetStatus.completed_cases / datasetStatus.total_cases) * 100}%` }}
+                              style={{ width: `${datasetStatus.total_cases > 0 ? (datasetStatus.completed_cases / datasetStatus.total_cases) * 100 : 0}%` }}
                             />
                           </div>
                           
