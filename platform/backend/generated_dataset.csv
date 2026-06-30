@@ -1,0 +1,3 @@
+lattice_type,pin_pitch,enrichment,soluble_boron,clad_material,poison_enabled,poison_fraction,control_rod_state,control_rod_material,particles,batches,k_eff,k_eff_std,reactivity,peak_power_factor
+Square,1.2,1.5,0.0,Zircaloy4,False,2.0,Fully Withdrawn,Ag-In-Cd,2000,25,1.1417138685743875,0.005722334577497101,0.12412380411156777,1.1746861083048328
+Square,1.275,1.5,0.0,Zircaloy4,False,2.0,Fully Withdrawn,Ag-In-Cd,2000,25,1.1707068446583775,0.005445137974121296,0.1458151931350425,1.1594905611115496

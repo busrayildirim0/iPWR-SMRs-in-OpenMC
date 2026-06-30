@@ -12,6 +12,10 @@ import pandas as pd
 import json
 import glob
 import warnings
+import sys
+
+# Detect OS globally
+is_linux = sys.platform == 'linux'
 
 # Suppress OpenMC auto ID warnings
 warnings.filterwarnings("ignore", message="Another .* instance already exists")
