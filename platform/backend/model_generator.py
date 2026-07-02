@@ -21,7 +21,7 @@ def generate_smr_model(
     gt_outer_radius=0.60198,       # Guide tube outer radius (cm)
     enrichment=4.5,                # U-235 enrichment (2.0 to 5.0) -> represented in percentage
     soluble_boron=975.0,           # Soluble boron concentration in coolant (ppm)
-    clad_material="Zircaloy4",     # "Zircaloy4", "M5", or "Q12"
+    clad_material="Zircaloy4",     # "Zircaloy4", "M5", "SS304", "FeCrAl" or "Q12"
     poison_enabled=False,          # Enable Burnable Poison
     poison_fraction=2.0,           # Gd2O3 concentration weight % (e.g. 2%)
     control_rod_state="Fully Withdrawn", # "Fully Withdrawn", "Fully Inserted", "Partially Inserted"
@@ -38,7 +38,9 @@ def generate_smr_model(
     shielding_enabled=False,       # Dose mapping & Vessel/Clad damage DPA
     economy_enabled=False,         # Detailed neutron economy & reaction rates
     flux_3d_enabled=False,         # Enable 3D mesh tallies
-    void_fraction=0.0              # Void fraction mult (e.g. 0.1 for 10% void)
+    void_fraction=0.0,             # Void fraction mult (e.g. 0.1 for 10% void)
+    fuel_material="UO2",           # "UO2" or "MOX"
+    fuel_density=10.42             # Fuel density (g/cm3)
 ):
     print(f"Generating SMR Model in {run_dir} (Boundary: {boundary_type}, Kinetics: {kinetics_enabled}, Depletion: {depletion_enabled})...")
     os.makedirs(run_dir, exist_ok=True)
@@ -50,37 +52,54 @@ def generate_smr_model(
     materials_list = []
     enrichment_fraction = enrichment / 100.0
     
-    # Standard UO2 Fuel Material
-    fuel = openmc.Material(name='Standard_UO2')
-    fuel.set_density('g/cm3', 10.42)
+    # Standard Fuel Material
+    fuel = openmc.Material(name='Standard_Fuel')
+    fuel.set_density('g/cm3', fuel_density)
     fuel.temperature = fuel_temperature
+    
     m_u = enrichment_fraction * 235.043 + (1.0 - enrichment_fraction) * 238.0507
     m_o2 = 2.0 * 15.999
     m_uo2 = m_u + m_o2
-    fuel.add_nuclide('U235', enrichment_fraction * (m_u / m_uo2), 'wo')
-    fuel.add_nuclide('U238', (1.0 - enrichment_fraction) * (m_u / m_uo2), 'wo')
-    fuel.add_nuclide('O16', m_o2 / m_uo2, 'wo')
+    
+    if fuel_material == "UO2":
+        fuel.add_nuclide('U235', enrichment_fraction * (m_u / m_uo2), 'wo')
+        fuel.add_nuclide('U238', (1.0 - enrichment_fraction) * (m_u / m_uo2), 'wo')
+        fuel.add_nuclide('O16', m_o2 / m_uo2, 'wo')
+    else:  # MOX (Mixed Oxide Fuel)
+        pu_frac = enrichment_fraction
+        u_frac = 1.0 - pu_frac
+        fuel.add_nuclide('U235', u_frac * 0.002 * (238.0 / 270.0), 'wo')
+        fuel.add_nuclide('U238', u_frac * 0.998 * (238.0 / 270.0), 'wo')
+        fuel.add_nuclide('Pu239', pu_frac * (239.0 / 271.0), 'wo')
+        fuel.add_nuclide('O16', 2.0 * 16.0 / 270.0, 'wo')
+        
     materials_list.append(fuel)
     
-    # Poisoned UO2-Gd2O3 Fuel Material if enabled
+    # Poisoned Fuel Material if enabled
     if poison_enabled:
         gd2o3_frac = poison_fraction / 100.0
-        uo2_frac = 1.0 - gd2o3_frac
+        fuel_frac = 1.0 - gd2o3_frac
         
-        poison_fuel = openmc.Material(name='Poisoned_UO2_Gd2O3')
-        poison_fuel.set_density('g/cm3', 10.1) # typical mixed density
+        poison_fuel = openmc.Material(name='Poisoned_Fuel_Gd2O3')
+        poison_fuel.set_density('g/cm3', fuel_density * 0.97) # Gd mixed is slightly lower density
         poison_fuel.temperature = fuel_temperature
-        # Add UO2 components scaled by uo2_frac
-        poison_fuel.add_nuclide('U235', enrichment_fraction * (m_u / m_uo2) * uo2_frac, 'wo')
-        poison_fuel.add_nuclide('U238', (1.0 - enrichment_fraction) * (m_u / m_uo2) * uo2_frac, 'wo')
-        poison_fuel.add_nuclide('O16', (m_o2 / m_uo2) * uo2_frac, 'wo')
-        # Add Gd2O3 components
-        # Molar mass of Gd2O3: Gd is ~157.25, O is ~16.0 -> 157.25*2 + 16.0*3 = 362.5
+        
+        if fuel_material == "UO2":
+            poison_fuel.add_nuclide('U235', enrichment_fraction * (m_u / m_uo2) * fuel_frac, 'wo')
+            poison_fuel.add_nuclide('U238', (1.0 - enrichment_fraction) * (m_u / m_uo2) * fuel_frac, 'wo')
+            poison_fuel.add_nuclide('O16', (m_o2 / m_uo2) * fuel_frac, 'wo')
+        else: # MOX
+            pu_frac = enrichment_fraction
+            u_frac = 1.0 - pu_frac
+            poison_fuel.add_nuclide('U235', u_frac * 0.002 * (238.0 / 270.0) * fuel_frac, 'wo')
+            poison_fuel.add_nuclide('U238', u_frac * 0.998 * (238.0 / 270.0) * fuel_frac, 'wo')
+            poison_fuel.add_nuclide('Pu239', pu_frac * (239.0 / 271.0) * fuel_frac, 'wo')
+            poison_fuel.add_nuclide('O16', (2.0 * 16.0 / 270.0) * fuel_frac, 'wo')
+            
         m_gd2 = 2 * 157.25
         m_o3 = 3 * 15.999
         m_gd2o3 = m_gd2 + m_o3
         poison_fuel.add_element('Gd', (m_gd2 / m_gd2o3) * gd2o3_frac, 'wo')
-        # Combined oxygen fraction
         o_poison_fraction = (m_o3 / m_gd2o3) * gd2o3_frac
         poison_fuel.add_nuclide('O16', o_poison_fraction, 'wo')
         materials_list.append(poison_fuel)
@@ -95,6 +114,16 @@ def generate_smr_model(
         clad.add_element('Sn', 0.0145, 'wo')
         clad.add_element('Fe', 0.0021, 'wo')
         clad.add_element('Cr', 0.0011, 'wo')
+    elif clad_material == "SS304":
+        clad.set_density('g/cm3', 8.00)
+        clad.add_element('Fe', 0.68, 'wo')
+        clad.add_element('Cr', 0.19, 'wo')
+        clad.add_element('Ni', 0.10, 'wo')
+    elif clad_material == "FeCrAl":
+        clad.set_density('g/cm3', 7.25)
+        clad.add_element('Fe', 0.73, 'wo')
+        clad.add_element('Cr', 0.22, 'wo')
+        clad.add_element('Al', 0.05, 'wo')
     else: # M5 or Q12
         clad.set_density('g/cm3', 6.55)
         clad.add_element('Zr', 0.9885, 'wo')
@@ -421,19 +450,48 @@ def generate_smr_model(
     rx_tally.scores = ['fission', 'absorption', '(n,2n)', 'scatter']
     tallies_list.append(rx_tally)
     
-    # Pin-by-pin Power & Reactions Mesh Tally
-    # In square lattice, we tally on 17x17 pin mesh
-    # In hexagonal lattice, we can also map on a regular mesh or use a mesh filter
+    # Fuel cells list for filtering
+    fuel_cells = [f_c1]
+    if poison_enabled:
+        fuel_cells.append(p_c1)
+
+    # 3. Radial Pin Power Tally (Mesh + Cell Filter)
     grid_res = 17 if lattice_type == "Square" else 15
     pin_mesh = openmc.RegularMesh()
     pin_mesh.dimension = [grid_res, grid_res]
     pin_mesh.lower_left = [-offset, -offset]
     pin_mesh.upper_right = [offset, offset]
     
-    pin_tally = openmc.Tally(name='Pin_Tally')
-    pin_tally.filters = [openmc.MeshFilter(pin_mesh)]
-    pin_tally.scores = ['kappa-fission'] # actual power heat deposition
-    tallies_list.append(pin_tally)
+    tally_pin = openmc.Tally(name="radial_pin_power")
+    tally_pin.filters = [
+        openmc.MeshFilter(pin_mesh),
+        openmc.CellFilter(fuel_cells)
+    ]
+    tally_pin.scores = ["fission"]
+    tallies_list.append(tally_pin)
+    
+    # 4. Axial Power Distribution Tally (Mesh Filter)
+    axial_mesh = openmc.RegularMesh()
+    axial_mesh.dimension = [1, 1, 200]
+    axial_mesh.lower_left = [-offset, -offset, -z_half]
+    axial_mesh.upper_right = [offset, offset, z_half]
+    
+    tally_axial = openmc.Tally(name="axial_power")
+    tally_axial.filters = [
+        openmc.MeshFilter(axial_mesh)
+    ]
+    tally_axial.scores = ["fission"]
+    tallies_list.append(tally_axial)
+    
+    # 5. Neutron Flux Spectrum Tally (Logspace Energy Filter + Cell Filter)
+    energy_bins = np.logspace(-5, 7.3, 501)
+    tally_spec = openmc.Tally(name="flux_spectrum")
+    tally_spec.filters = [
+        openmc.CellFilter(fuel_cells),
+        openmc.EnergyFilter(energy_bins)
+    ]
+    tally_spec.scores = ["flux"]
+    tallies_list.append(tally_spec)
     
     # Fine Spatial Analysis Tally (Flux/Fission/Absorption detailed heatmaps)
     fine_mesh = openmc.RegularMesh()
@@ -446,9 +504,8 @@ def generate_smr_model(
     fine_tally.scores = ['flux', 'fission', 'absorption']
     tallies_list.append(fine_tally)
     
-    # Group-wise Flux Mesh Tallies (Thermal, Fast, Group-wise)
-    # Energy bins: Thermal (<0.625 eV), Epithermal (0.625 eV to 100 keV), Fast (>100 keV)
-    energy_filter = openmc.EnergyFilter([0.0, 0.625, 1.0e5, 2.0e7]) # in eV
+    # Group-wise Flux Mesh Tallies (Thermal, Epithermal, Fast)
+    energy_filter = openmc.EnergyFilter([0.0, 0.625, 1.0e5, 2.0e7])
     
     group_tally = openmc.Tally(name='Group_Flux_Tally')
     group_tally.filters = [openmc.MeshFilter(fine_mesh), energy_filter]
@@ -460,16 +517,6 @@ def generate_smr_model(
     spec_fission_tally.filters = [energy_filter]
     spec_fission_tally.scores = ['fission']
     tallies_list.append(spec_fission_tally)
-    
-    # Fine Energy Spectrum Tally (500 logarithmic bins)
-    energy_bins = np.logspace(-5, 7.3, 500)
-    # OpenMC expects custom list for energy bins
-    e_filter = openmc.EnergyFilter(energy_bins)
-    
-    spec_tally = openmc.Tally(name='Energy_Spectrum_Tally')
-    spec_tally.filters = [e_filter]
-    spec_tally.scores = ['flux']
-    tallies_list.append(spec_tally)
     
     # Cladding DPA Tally if shielding enabled
     if shielding_enabled:

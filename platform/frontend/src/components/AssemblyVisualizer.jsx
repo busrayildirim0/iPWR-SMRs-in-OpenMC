@@ -180,6 +180,7 @@ export default function AssemblyVisualizer({
   activeMap = 'none' // 'none', 'power', 'absorption', 'flux'
 }) {
   const [hoveredPin, setHoveredPin] = useState(null);
+  const [selectedPin, setSelectedPin] = useState(null);
   
   // Generate pin coordinates
   const pins = useMemo(() => {
@@ -218,7 +219,6 @@ export default function AssemblyVisualizer({
     if (activeMap === 'power' && results.pin_power_map) {
       values = results.pin_power_map.flat().filter(v => v > 0);
     } else if (activeMap === 'flux' && results.flux_map) {
-      // Map to 170x170, but we can also use average values
       values = results.flux_map.flat();
     } else if (activeMap === 'absorption' && results.absorption_map) {
       values = results.absorption_map.flat();
@@ -237,14 +237,9 @@ export default function AssemblyVisualizer({
     
     if (activeMap === 'power') {
       if (latticeType === 'Square' && results.pin_power_map) {
-        // Read directly from 17x17 pin power grid
         const val = results.pin_power_map[pin.row]?.[pin.col] || 0;
         return val > 0 ? getHeatmapColor(val, heatmapRange.min, heatmapRange.max) : 'rgba(30, 41, 59, 0.4)';
       } else if (latticeType === 'Hexagonal' && results.pin_power_map) {
-        // Hexagonal grid has 127 pins. In model generator, we tallied on a 15x15 grid.
-        // We map the hexagonal pin to the nearest 15x15 grid coordinate.
-        // Or we can interpolate based on its radial layout.
-        // Let's do a simple mapping from hex space to 15x15
         const offset = 6.5 * pinPitch;
         const colIdx = Math.floor(((pin.x + offset) / (2 * offset)) * 15);
         const rowIdx = Math.floor(((offset - pin.y) / (2 * offset)) * 15);
@@ -252,8 +247,6 @@ export default function AssemblyVisualizer({
         return val > 0 ? getHeatmapColor(val, heatmapRange.min, heatmapRange.max) : 'rgba(30, 41, 59, 0.4)';
       }
     } else {
-      // Detailed heatmaps (170x170 grid)
-      // Map pin coordinate (x,y) to 170x170 index
       const mapData = activeMap === 'flux' ? results.flux_map : results.absorption_map;
       if (!mapData) return null;
       
@@ -270,10 +263,56 @@ export default function AssemblyVisualizer({
     
     return null;
   };
+
+  const getPinTitle = (pin) => {
+    if (!pin) return '';
+    if (pin.type === 'fuel' || (pin.type === 'poison' && !poisonEnabled)) return 'UO₂ Fuel Pin';
+    if (pin.type === 'poison') return 'UO₂-Gd₂O₃ Poison Pin';
+    if (pin.type === 'control') return 'Control Rod / Guide Tube';
+    return 'Instrument Guide Tube';
+  };
+
+  const getMaterialColor = (pin) => {
+    if (!pin) return '#fff';
+    if (pin.type === 'control') {
+      return controlRodState === 'Fully Withdrawn' ? MATERIAL_COLORS.water : MATERIAL_COLORS.control;
+    }
+    if (pin.type === 'guide') return MATERIAL_COLORS.guide;
+    if (pin.type === 'poison') return poisonEnabled ? MATERIAL_COLORS.poison : MATERIAL_COLORS.fuel;
+    return MATERIAL_COLORS.fuel;
+  };
+
+  const getPinValue = (pin) => {
+    if (!results || !pin) return 'N/A';
+    if (activeMap === 'power' && results.pin_power_map) {
+      const val = latticeType === 'Square'
+        ? results.pin_power_map[pin.row]?.[pin.col]
+        : (() => {
+            const offset = 6.5 * pinPitch;
+            const colIdx = Math.floor(((pin.x + offset) / (2 * offset)) * 15);
+            const rowIdx = Math.floor(((offset - pin.y) / (2 * offset)) * 15);
+            return results.pin_power_map[rowIdx]?.[colIdx];
+          })();
+      return val !== undefined && val !== null ? `${val.toExponential(4)} W/cm³` : '0.0000e+0 W/cm³';
+    }
+    const mapData = activeMap === 'flux' ? results.flux_map : results.absorption_map;
+    if (!mapData) return 'N/A';
+    
+    const width = bounds.width - pinPitch * 2;
+    const xRatio = (pin.x - (bounds.minX + pinPitch)) / width;
+    const yRatio = ((bounds.minY + bounds.height - pinPitch) - pin.y) / width;
+    const colIdx = Math.floor(xRatio * 170);
+    const rowIdx = Math.floor(yRatio * 170);
+    const val = mapData[rowIdx]?.[colIdx] || 0;
+    
+    return activeMap === 'flux' 
+      ? `${val.toExponential(4)} n/cm²-s`
+      : `${val.toExponential(4)} abs/cm³-s`;
+  };
   
   return (
-    <div className="visualizer-wrapper">
-      <div className="visualizer-container">
+    <div className="visualizer-wrapper w-full flex flex-col gap-4">
+      <div className="visualizer-container relative overflow-hidden bg-slate-950/20 border border-slate-900 rounded-xl p-2">
         {/* SVG Viewport */}
         <svg
           viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`}
@@ -314,36 +353,32 @@ export default function AssemblyVisualizer({
             
             // Determine active color of components based on configuration state
             let pinColor = MATERIAL_COLORS.fuel;
-            let label = "Fuel Rod (UO₂)";
             
             if (pin.type === 'control') {
               if (controlRodState === 'Fully Withdrawn') {
                 pinColor = MATERIAL_COLORS.water;
-                label = "Empty Guide Tube (Water Filled)";
               } else {
                 pinColor = MATERIAL_COLORS.control;
-                label = `Control Rod (${controlRodState})`;
               }
             } else if (pin.type === 'guide') {
               pinColor = MATERIAL_COLORS.guide;
-              label = "Instrumentation Tube";
             } else if (pin.type === 'poison') {
               if (poisonEnabled) {
                 pinColor = MATERIAL_COLORS.poison;
-                label = "Burnable Poison Rod (UO₂-Gd₂O₃)";
               } else {
                 pinColor = MATERIAL_COLORS.fuel;
-                label = "Fuel Rod (UO₂)";
               }
             }
             
             const isHovered = hoveredPin === i;
+            const isSelected = selectedPin === i;
             
             return (
               <g
                 key={i}
                 onMouseEnter={() => setHoveredPin(i)}
                 onMouseLeave={() => setHoveredPin(null)}
+                onClick={() => setSelectedPin(i)}
                 style={{ cursor: 'pointer' }}
               >
                 {/* Cladding Outer Circle */}
@@ -373,8 +408,20 @@ export default function AssemblyVisualizer({
                   />
                 )}
                 
+                {/* Selected Highlight Ring */}
+                {isSelected && (
+                  <circle
+                    cx={pin.x}
+                    cy={pin.y}
+                    r={pinPitch * 0.48}
+                    fill="none"
+                    stroke="#10b981"
+                    strokeWidth="0.08"
+                  />
+                )}
+                
                 {/* Hover Highlight Ring */}
-                {isHovered && (
+                {isHovered && !isSelected && (
                   <circle
                     cx={pin.x}
                     cy={pin.y}
@@ -388,66 +435,84 @@ export default function AssemblyVisualizer({
             );
           })}
         </svg>
-        
-        {/* Tooltip Overlay */}
-        {hoveredPin !== null && (
-          <div className="absolute bottom-4 left-4 right-4 bg-slate-950/90 border border-sky-500/30 backdrop-blur-md px-4 py-3 rounded-lg text-xs pointer-events-none flex flex-col gap-1 shadow-lg">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-1 mb-1">
-              <span className="font-semibold text-sky-400">
-                {pins[hoveredPin].type === 'fuel' || (pins[hoveredPin].type === 'poison' && !poisonEnabled) ? 'UO₂ Fuel Pin' : 
-                 (pins[hoveredPin].type === 'poison' ? 'UO₂-Gd₂O₃ Poison Pin' : 
-                  (pins[hoveredPin].type === 'control' ? 'Control Rod / Guide Tube' : 'Instrument Guide Tube'))}
-              </span>
-              <span className="text-slate-500">
-                {latticeType === 'Square' ? `R: ${pins[hoveredPin].row}, C: ${pins[hoveredPin].col}` : `Q: ${pins[hoveredPin].q}, R: ${pins[hoveredPin].r}`}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              <span className="text-slate-400">Coordinate X:</span>
-              <span className="text-slate-200 text-right">{pins[hoveredPin].x.toFixed(4)} cm</span>
-              <span className="text-slate-400">Coordinate Y:</span>
-              <span className="text-slate-200 text-right">{pins[hoveredPin].y.toFixed(4)} cm</span>
-              
-              {results && activeMap === 'power' && results.pin_power_map && (
-                <>
-                  <span className="text-slate-400 font-medium">Pin Power:</span>
-                  <span className="text-emerald-400 text-right font-semibold">
-                    {latticeType === 'Square' 
-                      ? (results.pin_power_map[pins[hoveredPin].row]?.[pins[hoveredPin].col] || 0).toExponential(3)
-                      : "Overlaid"
-                    }
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-        )}
       </div>
       
       {/* Legend */}
-      <div className="mt-4 flex flex-wrap gap-4 justify-center text-xs text-slate-400">
+      <div className="flex flex-wrap gap-4 justify-center text-[10px] text-slate-500 border-b border-slate-900 pb-3">
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.fuel }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.fuel }} />
           <span>UO₂ Fuel</span>
         </div>
         {poisonEnabled && (
           <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.poison }} />
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.poison }} />
             <span>UO₂-Gd₂O₃ poison</span>
           </div>
         )}
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.clad }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.clad }} />
           <span>Cladding</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.water }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.water }} />
           <span>Coolant (Water)</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.control }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: MATERIAL_COLORS.control }} />
           <span>Control Absorber</span>
         </div>
+      </div>
+
+      {/* Selected Component Details Box */}
+      <div className="panel bg-[#0e1626]/40 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-3 min-h-[90px] justify-center transition-all duration-200">
+        {selectedPin !== null ? (
+          <div>
+            <div className="flex justify-between items-center border-b border-slate-800/60 pb-2 mb-2">
+              <span className="font-bold text-slate-200 text-xs flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getMaterialColor(pins[selectedPin]) }} />
+                {getPinTitle(pins[selectedPin])}
+              </span>
+              <span className="text-[10px] font-mono text-sky-400 bg-sky-950/40 px-2 py-0.5 rounded border border-sky-900/30">
+                {latticeType === 'Square' 
+                  ? `Row: ${pins[selectedPin].row}, Col: ${pins[selectedPin].col}`
+                  : `Hex: Q = ${pins[selectedPin].q}, R = ${pins[selectedPin].r}`
+                }
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-slate-400">
+              <div className="flex justify-between border-b border-slate-900/50 pb-1">
+                <span>Coord X:</span>
+                <span className="text-slate-200 font-mono">{pins[selectedPin].x.toFixed(4)} cm</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-900/50 pb-1">
+                <span>Pellet Rad:</span>
+                <span className="text-slate-200 font-mono">{fuelRadius.toFixed(5)} cm</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-900/50 pb-1">
+                <span>Coord Y:</span>
+                <span className="text-slate-200 font-mono">{pins[selectedPin].y.toFixed(4)} cm</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-900/50 pb-1">
+                <span>Clad Outer Rad:</span>
+                <span className="text-slate-200 font-mono">{cladRadius.toFixed(5)} cm</span>
+              </div>
+            </div>
+
+            {results && activeMap !== 'none' && (
+              <div className="mt-2.5 pt-2.5 border-t border-slate-800/60 flex justify-between items-center text-xs">
+                <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">TALLY VALUE ({activeMap}):</span>
+                <span className="text-emerald-400 font-bold font-mono text-xs">
+                  {getPinValue(pins[selectedPin])}
+                </span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-2 text-xs text-slate-500 italic">
+            Click on any fuel pin or guide tube above to display its coordinates, dimension specs, and physical tally results.
+          </div>
+        )}
       </div>
     </div>
   );
