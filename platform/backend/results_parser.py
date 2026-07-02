@@ -6,7 +6,6 @@ import glob
 import os
 import warnings
 
-# Suppress OpenMC auto ID warnings during statepoint deserialization
 warnings.filterwarnings("ignore", message="Another .* instance already exists")
 
 def parse_openmc_results(run_dir, lattice_type="Square"):
@@ -40,6 +39,24 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
         else:
             results['reactivity'] = 0.0
             
+        # Parse individual k-effective estimators from global_tallies
+        k_col = [0.0, 0.0]
+        k_abs = [0.0, 0.0]
+        k_tra = [0.0, 0.0]
+        for row in sp.global_tallies:
+            name = row['name'].decode('utf-8') if isinstance(row['name'], bytes) else row['name']
+            if name == 'k-collision':
+                k_col = [float(row['mean']), float(row['std_dev'])]
+            elif name == 'k-absorption':
+                k_abs = [float(row['mean']), float(row['std_dev'])]
+            elif name == 'k-tracklength':
+                k_tra = [float(row['mean']), float(row['std_dev'])]
+        
+        results['k_collision'] = k_col
+        results['k_absorption'] = k_abs
+        results['k_tracklength'] = k_tra
+        results['k_combined'] = [k_val, k_std]
+
         # Shannon Entropy (source convergence)
         entropy_val = sp.entropy
         results['shannon_entropy'] = [float(e) for e in entropy_val]
@@ -107,15 +124,21 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
         except Exception as e:
             results['spectral_index'] = 0.0
             
-        # 3. Parse Pin-by-pin Power Map (kappa-fission)
+        # 3. Parse Pin-by-pin Power Map (radial_pin_power)
         try:
-            pin_tally = sp.get_tally(name='Pin_Tally')
-            power_data = pin_tally.get_slice(scores=['kappa-fission']).mean
+            try:
+                pin_tally = sp.get_tally(name='radial_pin_power')
+                power_data = pin_tally.get_slice(scores=['fission']).mean
+                # Since multiple cells exist (standard + poison), shape is (grid_res, grid_res, len(fuel_cells)) or similar.
+                power_data_summed = power_data.reshape((grid_res, grid_res, -1)).sum(axis=2)
+            except LookupError:
+                # Fallback to older Pin_Tally
+                pin_tally = sp.get_tally(name='Pin_Tally')
+                power_data = pin_tally.get_slice(scores=['kappa-fission']).mean
+                power_data_summed = power_data.reshape((grid_res, grid_res))
             
-            # Reshape mesh tally output to 2D grid
-            power_grid = power_data.reshape((grid_res, grid_res))
             # Flip vertically to match standard coordinate visualization
-            power_grid = np.flipud(power_grid)
+            power_grid = np.flipud(power_data_summed)
             
             # Convert to list of lists
             results['pin_power_map'] = [[float(v) for v in row] for row in power_grid]
@@ -140,12 +163,25 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
                 results['relative_power_map'] = results['pin_power_map']
                 
         except Exception as e:
-            print(f"Error parsing Pin Tally: {e}")
+            print(f"Error parsing radial_pin_power Tally: {e}")
             results['pin_power_map'] = [[0.0] * grid_res] * grid_res
             results['relative_power_map'] = [[0.0] * grid_res] * grid_res
             results['peak_power_factor'] = 1.0
             results['hot_channel_factor'] = 1.0
             
+        # Parse Axial Power Profile (axial_power)
+        try:
+            axial_tally = sp.get_tally(name='axial_power')
+            axial_data = axial_tally.get_slice(scores=['fission']).mean.flatten()
+            # Normalize to relative power (average over active elements = 1.0)
+            active_mask = axial_data > 0
+            average_power = float(np.mean(axial_data[active_mask])) if np.any(active_mask) else 1.0
+            norm_axial = [float(v / average_power) if average_power > 0 else float(v) for v in axial_data]
+            results['axial_power_profile'] = norm_axial
+        except Exception as e:
+            print(f"Error parsing axial_power Tally: {e}")
+            results['axial_power_profile'] = [1.0] * 200
+
         # 4. Parse Fine Spatial Maps (170x170 grids of Flux, Fission, Absorption)
         try:
             fine_tally = sp.get_tally(name='Fine_Mesh_Tally')
@@ -197,23 +233,43 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
             results['fast_flux_map'] = [[0.0] * 170] * 170
             results['dose_rate_map'] = [[0.0] * 170] * 170
             
-        # 6. Parse Energy Spectrum
+        # 6. Parse Energy Spectrum (flux_spectrum)
         try:
-            spec_tally = sp.get_tally(name='Energy_Spectrum_Tally')
-            spec_data = spec_tally.mean.flatten()
-            e_filter = spec_tally.filters[0]
+            try:
+                spec_tally = sp.get_tally(name='flux_spectrum')
+                e_filter_idx = 1
+            except LookupError:
+                # Fallback to old tally
+                spec_tally = sp.get_tally(name='Energy_Spectrum_Tally')
+                e_filter_idx = 0
+                
+            spec_data_all = spec_tally.mean
+            
+            # If shape is (num_cells, num_groups, 1), sum over cells to get standard + poison total
+            if len(spec_data_all.shape) == 3 and spec_data_all.shape[0] > 1 and spec_data_all.shape[1] > 1:
+                spec_data = spec_data_all.sum(axis=0).flatten()
+            else:
+                spec_data = spec_data_all.flatten()
+                
+            e_filter = spec_tally.filters[e_filter_idx]
             e_bins = e_filter.bins
             
             centers = []
+            flux_normalized = []
             for i in range(len(e_bins) - 1):
                 low = e_bins[i][0]
                 high = e_bins[i][1]
                 centers.append(float(np.sqrt(low * high))) # geometric mean for log plots
                 
+                # Letarji hesabı (Kutu Genişliği): delta_ln_E = ln(high/low)
+                delta_ln_E = np.log(high / low)
+                flux_val = float(spec_data[i] / delta_ln_E) if delta_ln_E > 0 else float(spec_data[i])
+                flux_normalized.append(flux_val)
+                
             results['energy_spectrum_centers'] = centers
-            results['energy_spectrum_flux'] = [float(v) for v in spec_data]
+            results['energy_spectrum_flux'] = flux_normalized
         except Exception as e:
-            print(f"Error parsing Energy Spectrum Tally: {e}")
+            print(f"Error parsing flux_spectrum Tally: {e}")
             results['energy_spectrum_centers'] = []
             results['energy_spectrum_flux'] = []
             

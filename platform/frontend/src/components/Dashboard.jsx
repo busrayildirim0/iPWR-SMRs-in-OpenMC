@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Play, Settings, BarChart2, Layers, Cpu, FileText, Database, 
-  Terminal, Shield, Compass, RefreshCw, Download, AlertTriangle, Eye 
+  Terminal, Shield, Compass, RefreshCw, Download, AlertTriangle, Eye,
+  Globe, Sun, Moon
 } from 'lucide-react';
 import AssemblyVisualizer from './AssemblyVisualizer';
 import PlotlyChart from './PlotlyChart';
@@ -72,7 +73,197 @@ const getSimplifiedLogs = (rawLogs) => {
   return filtered.join('\n');
 };
 
+const localizations = {
+  en: {
+    appTitle: "OpenMC SMR Neutronics Platform",
+    appSub: "Civilian SMR Fuel Assembly Parametric Simulation Dashboard",
+    simulation: "Simulation",
+    datasetGen: "Dataset Gen",
+    openmcActive: "OpenMC 0.15.3 WSL Active",
+    configurator: "Assembly Configurator",
+    preset: "Preset",
+    geometrySettings: "Geometry & Lattice",
+    latticeType: "Lattice Type",
+    pinPitch: "Pin Pitch (cm)",
+    activeHeight: "Active Height (cm)",
+    fuelPelletRadius: "Fuel Pellet Radius (cm)",
+    gasGapRadius: "Gas Gap Radius (cm)",
+    cladOuterRadius: "Clad Outer Radius (cm)",
+    guideTubeInner: "GT Inner Radius (cm)",
+    guideTubeOuter: "GT Outer Radius (cm)",
+    materialSettings: "Materials & Temperatures",
+    fuelMaterial: "Fuel Material",
+    fuelDensity: "Fuel Density (g/cm³)",
+    fuelTemp: "Fuel Temp (K)",
+    cladMaterial: "Clad Material",
+    coolantTemp: "Coolant Temp (K)",
+    solubleBoron: "Soluble Boron (ppm)",
+    poisonEnable: "Enable Burnable Poison (Gd₂O₃)",
+    poisonWeight: "Gd₂O₃ Weight Fraction (%)",
+    controlRodState: "Control Rod State",
+    controlRodMaterial: "Absorber Material",
+    simulationSettings: "Monte Carlo Engine",
+    particles: "Particles per Batch",
+    batches: "Active Batches",
+    inactiveBatches: "Inactive Batches (Skip)",
+    runButton: "Run Assembly Simulation",
+    geometryVisualizer: "Geometry Visualizer",
+    liveLogs: "Simulation Live Logs",
+    simplified: "Simplified",
+    rawLogs: "Raw Logs",
+    xsNuclide: "Select Nuclide",
+    xsTitle: "Microscopic Cross Sections (ENDF/B-VII.1)",
+    xsLoading: "Loading ENDF/B-VII.1 libraries...",
+    xsError: "Could not retrieve nuclear database cross-section records.",
+    sweepsConfig: "Parametric Sweeps Config",
+    enrichmentRange: "U-235 Enrichment range (%)",
+    boronRange: "Soluble Boron range (ppm)",
+    fuelTempRange: "Fuel Temperature range (K)",
+    coolantTempRange: "Coolant Temperature range (K)",
+    poisonRange: "Burnable Poison Gd₂O₃ range (wt %)",
+    cladThickRange: "Cladding Thickness range (cm)",
+    lhsSamples: "Latin Hypercube Samples (N)",
+    lhsSamplesSub: "Determines the exact total number of valid simulated points generated inside the parameter space.",
+    queueTitle: "Generation Queue",
+    status: "Status",
+    statusInactive: "Inactive",
+    statusGenerating: "Generating Cases...",
+    completed: "Completed",
+    percentage: "Percentage",
+    currentCase: "Current Case Parameters",
+    stopGen: "Stop Dataset Generation",
+    startGen: "Start Iterative Generation",
+    downloadCsv: "Download Generated CSV",
+    alertTitle: "Dataset Generation Mode Alert",
+    alertSub: "Dataset generation mode sweeps across variables using Latin Hypercube Sampling (LHS). Every simulated point dynamically inherits the fixed reactor geometries and Monte Carlo engine specifications (particles, active/inactive batches, boundary conditions) configured directly inside the Assembly Configurator.",
+    controlVariables: "Control Variables (Constants)",
+    lattice: "Lattice",
+    boundary: "Boundary",
+    reflective: "Reflective",
+    fixed: "Fixed",
+    constantsSub: "* Constant parameters are locked to the current Active Configurator state to minimize noise in critical ML training targets.",
+    resultsPanel: "Results & Analyses",
+    keffCard: "Infinite Multiplication Factor (k∞)",
+    reactivityCard: "Excess Reactivity (ρ)",
+    peakingCard: "Pin Power Peaking Factor (Fq)",
+    dpaCard: "Cladding Damage Energy (DPA Rate proxy)",
+    doseCard: "Estimated Peak Biological Dose Rate",
+    spectralIndexCard: "Neutron Spectral Index",
+    leakageCard: "Neutron Leakage Fraction",
+    reproductionCard: "Fission Reproduction Factor (η)",
+    enrichment: "U-235 Enrichment",
+    cladThickness: "Clad Thickness"
+  },
+  tr: {
+    appTitle: "OpenMC SMR Nötronik Platformu",
+    appSub: "Sivil SMR Yakıt Demeti Parametrik Simülasyon Paneli",
+    simulation: "Simülasyon",
+    enrichment: "U-235 Zenginliği",
+    cladThickness: "Kaplama Kalınlığı",
+    datasetGen: "Veri Seti Üret",
+    openmcActive: "OpenMC 0.15.3 WSL Aktif",
+    configurator: "Demet Konfigüratörü",
+    preset: "Şablon",
+    geometrySettings: "Geometri ve Dizilim",
+    latticeType: "Dizilim Tipi",
+    pinPitch: "Çubuk Adımı (Pitch - cm)",
+    activeHeight: "Aktif Yakıt Boyu (cm)",
+    fuelPelletRadius: "Yakıt Pelet Yarıçapı (cm)",
+    gasGapRadius: "Gaz Boşluğu Yarıçapı (cm)",
+    cladOuterRadius: "Kaplama Dış Yarıçapı (cm)",
+    guideTubeInner: "Kılavuz Tüp İç Yarıçapı (cm)",
+    guideTubeOuter: "Kılavuz Tüp Dış Yarıçapı (cm)",
+    materialSettings: "Malzemeler ve Sıcaklıklar",
+    fuelMaterial: "Yakıt Malzemesi",
+    fuelDensity: "Yakıt Yoğunluğu (g/cm³)",
+    fuelTemp: "Yakıt Sıcaklığı (K)",
+    cladMaterial: "Kaplama Malzemesi",
+    coolantTemp: "Soğutucu Sıcaklığı (K)",
+    solubleBoron: "Çözünmüş Bor (ppm)",
+    poisonEnable: "Yanabilir Zehir Etkinleştir (Gd₂O₃)",
+    poisonWeight: "Gd₂O₃ Ağırlık Oranı (%)",
+    controlRodState: "Kontrol Çubuğu Konumu",
+    controlRodMaterial: "Absorber Malzemesi",
+    simulationSettings: "Monte Carlo Motoru",
+    particles: "Parçacık Sayısı (Batch başına)",
+    batches: "Aktif Batch Sayısı",
+    inactiveBatches: "Aktif Olmayan Batch Sayısı",
+    runButton: "Demet Simülasyonunu Başlat",
+    geometryVisualizer: "Geometri Görselleştirici",
+    liveLogs: "Simülasyon Canlı Logları",
+    simplified: "Basitleştirilmiş",
+    rawLogs: "Ham Loglar",
+    xsNuclide: "Nükleer İzotop Seçin",
+    xsTitle: "Mikroskopik Tesir Kesitleri (ENDF/B-VII.1)",
+    xsLoading: "ENDF/B-VII.1 kütüphaneleri yükleniyor...",
+    xsError: "Nükleer veri tabanı tesir kesiti kayıtları alınamadı.",
+    sweepsConfig: "Parametrik Tarama (LHS) Ayarları",
+    enrichmentRange: "U-235 Zenginlik Aralığı (%)",
+    boronRange: "Çözünmüş Bor Aralığı (ppm)",
+    fuelTempRange: "Yakıt Sıcaklığı Aralığı (K)",
+    coolantTempRange: "Soğutucu Sıcaklığı Aralığı (K)",
+    poisonRange: "Yanabilir Zehir Gd₂O₃ Aralığı (wt %)",
+    cladThickRange: "Kaplama Kalınlığı Aralığı (cm)",
+    lhsSamples: "Latin Hiperküp Örnekleme Sayısı (N)",
+    lhsSamplesSub: "Parametre uzayında üretilecek ve simüle edilecek toplam geçerli nokta sayısını belirler.",
+    queueTitle: "Veri Üretim Kuyruğu",
+    status: "Durum",
+    statusInactive: "Pasif",
+    statusGenerating: "Simülasyonlar Çalışıyor...",
+    completed: "Tamamlanan",
+    percentage: "Yüzde",
+    currentCase: "Aktif Simülasyon Parametreleri",
+    stopGen: "Veri Üretimini Durdur",
+    startGen: "İteratif Veri Üretimini Başlat",
+    downloadCsv: "Üretilen CSV Dosyasını İndir",
+    alertTitle: "Veri Seti Üretim Modu Uyarısı",
+    alertSub: "Veri seti üretimi, Latin Hiperküp Örneklemesi (LHS) kullanarak değişken parametreleri tarar. Simüle edilen her durum, doğrudan Demet Konfigüratörü sekmesinde ayarladığınız sabit reaktör geometrilerini ve Monte Carlo motor ayarlarını (parçacıklar, aktif/inaktif batch sayıları, sınır koşulları) dinamik olarak devralır.",
+    controlVariables: "Sabit Tutulan Parametreler (Kontrol Değişkenleri)",
+    lattice: "Dizilim",
+    boundary: "Sınır Koşulu",
+    reflective: "Yansıtıcı",
+    fixed: "Sabit",
+    constantsSub: "* Sabit parametreler, makine öğrenmesi modellerindeki gürültüyü azaltmak için o anki aktif Konfigüratör ayarlarına kilitlenmiştir.",
+    resultsPanel: "Analiz Sonuçları ve Grafikler",
+    keffCard: "Sonsuz Çoğaltma Faktörü (k∞)",
+    reactivityCard: "Fazla Reaktivite (ρ)",
+    peakingCard: "Pik Güç Faktörü (Fq)",
+    dpaCard: "Kaplama Hasar Enerjisi (DPA Rate proxy)",
+    doseCard: "Tahmini Pik Biyolojik Doz Hızı",
+    spectralIndexCard: "Nötron Spektrum İndeksi",
+    leakageCard: "Nötron Sızıntı Oranı",
+    reproductionCard: "Fisyon Üretim Faktörü (η)"
+  }
+};
+
 export default function Dashboard() {
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+  const [lang, setLang] = useState(() => localStorage.getItem('lang') || 'tr');
+
+  useEffect(() => {
+    if (theme === 'light') {
+      document.body.classList.add('light-theme');
+    } else {
+      document.body.classList.remove('light-theme');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    localStorage.setItem('theme', nextTheme);
+  };
+  
+  const toggleLang = () => {
+    const nextLang = lang === 'en' ? 'tr' : 'en';
+    setLang(nextLang);
+    localStorage.setItem('lang', nextLang);
+  };
+
+  const t = (key) => {
+    return localizations[lang][key] || key;
+  };
+
   // Preset list
   const [presets, setPresets] = useState({});
   const [activePreset, setActivePreset] = useState('NuScale');
@@ -104,7 +295,10 @@ export default function Dashboard() {
     depletion_enabled: false,
     shielding_enabled: false,
     economy_enabled: false,
-    flux_3d_enabled: false
+    flux_3d_enabled: false,
+    fuel_material: 'UO2',
+    fuel_density: 10.42,
+    fuel_temperature: 900.0
   });
 
   // Config tab state
@@ -132,13 +326,17 @@ export default function Dashboard() {
   const [datasetParams, setDatasetParams] = useState({
     enrichment_min: 2.0,
     enrichment_max: 5.0,
-    enrichment_steps: 3,
     boron_min: 0,
     boron_max: 2000,
-    boron_steps: 3,
-    pitch_min: 1.20,
-    pitch_max: 1.35,
-    pitch_steps: 3
+    fuel_temp_min: 600,
+    fuel_temp_max: 1200,
+    coolant_temp_min: 500,
+    coolant_temp_max: 600,
+    poison_min: 0.0,
+    poison_max: 8.0,
+    clad_thick_min: 0.03,
+    clad_thick_max: 0.08,
+    num_samples: 50
   });
   const [datasetStatus, setDatasetStatus] = useState({
     active: false,
@@ -147,8 +345,14 @@ export default function Dashboard() {
     current_params: {}
   });
 
+  // Nuclear Database Cross Section states
+  const [xsData, setXsData] = useState(null);
+  const [xsLoading, setXsLoading] = useState(false);
+  const [selectedXsNuclide, setSelectedXsNuclide] = useState('U235');
+
   // Ref for log console auto-scrolling
   const logConsoleRef = useRef(null);
+  const alertedJobIdRef = useRef(null);
 
   // Fetch SMR Presets on mount
   useEffect(() => {
@@ -165,12 +369,35 @@ export default function Dashboard() {
             shielding_enabled: false,
             economy_enabled: false,
             flux_3d_enabled: false,
+            fuel_material: 'UO2',
+            fuel_density: 10.42,
+            fuel_temperature: 900.0,
             ...data.NuScale
           });
         }
       })
       .catch(err => console.error("Error loading presets:", err));
   }, []);
+
+  // Fetch Cross-Sections when 'xs' tab is selected
+  useEffect(() => {
+    if (resultsTab === 'xs' && !xsData && !xsLoading) {
+      setXsLoading(true);
+      fetch('/api/nuclear-data/xs')
+        .then(res => {
+          if (!res.ok) throw new Error("Could not fetch nuclear database");
+          return res.json();
+        })
+        .then(data => {
+          setXsData(data);
+          setXsLoading(false);
+        })
+        .catch(err => {
+          console.error("Error loading cross sections:", err);
+          setXsLoading(false);
+        });
+    }
+  }, [resultsTab, xsData, xsLoading]);
 
   // Poll dataset generator status periodically
   useEffect(() => {
@@ -180,11 +407,15 @@ export default function Dashboard() {
         fetch('/api/dataset/status')
           .then(res => res.json())
           .then(data => {
-            setDatasetStatus(data);
-            if (!data.active && datasetStatus.active) {
-              // Just finished
-              alert("Dataset Generation completed!");
-            }
+            setDatasetStatus(prev => {
+              if (prev.active && !data.active && data.job_id && alertedJobIdRef.current !== data.job_id) {
+                alertedJobIdRef.current = data.job_id;
+                setTimeout(() => {
+                  alert(lang === 'en' ? "Dataset Generation completed!" : "Veri seti üretimi tamamlandı!");
+                }, 50);
+              }
+              return data;
+            });
           })
           .catch(err => console.error("Error checking dataset status:", err));
       };
@@ -195,7 +426,7 @@ export default function Dashboard() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [mainTab, datasetStatus.active]);
+  }, [mainTab, datasetStatus.active, lang]);
 
   // Handle Preset selection change
   const handlePresetChange = (name) => {
@@ -210,6 +441,9 @@ export default function Dashboard() {
         shielding_enabled: false,
         economy_enabled: false,
         flux_3d_enabled: false,
+        fuel_material: 'UO2',
+        fuel_density: 10.42,
+        fuel_temperature: 900.0,
         ...presets[name]
       });
       // Adjust overlay if switching presets
@@ -344,6 +578,7 @@ export default function Dashboard() {
   const triggerDatasetGeneration = () => {
     const dParams = {
       ...datasetParams,
+      num_samples: parseInt(datasetParams.num_samples) || 10,
       base_params: params
     };
     
@@ -384,10 +619,24 @@ export default function Dashboard() {
   const energySpectrumPlot = useMemo(() => {
     if (!simulationResults?.energy_spectrum_centers) return null;
     
+    // Filter out non-positive values to prevent Plotly rendering failures on log-log axis
+    const centers = [];
+    const flux = [];
+    for (let i = 0; i < simulationResults.energy_spectrum_centers.length; i++) {
+      const f = simulationResults.energy_spectrum_flux[i];
+      const c = simulationResults.energy_spectrum_centers[i];
+      if (f > 0 && c > 0) {
+        centers.push(c);
+        flux.push(f);
+      }
+    }
+    
+    if (centers.length === 0) return null;
+    
     return {
       data: [{
-        x: simulationResults.energy_spectrum_centers,
-        y: simulationResults.energy_spectrum_flux,
+        x: centers,
+        y: flux,
         type: 'scatter',
         mode: 'lines',
         name: 'Neutron Flux',
@@ -410,6 +659,33 @@ export default function Dashboard() {
       }
     };
   }, [simulationResults]);
+
+  const axialPowerPlot = useMemo(() => {
+    if (!simulationResults?.axial_power_profile) return null;
+    const levels = Array.from({ length: 200 }, (_, i) => i + 1);
+    const profile = simulationResults.axial_power_profile;
+    return {
+      data: [{
+        x: profile,
+        y: levels,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Axial Power',
+        line: { color: '#fb7185', width: 2.5 }
+      }],
+      layout: {
+        title: lang === 'en' ? 'Normalized Axial Power Profile' : 'Normalize Eksenel Güç Profili',
+        xaxis: { 
+          title: lang === 'en' ? 'Relative Power (normalized to average)' : 'Göreceli Güç (ortalama = 1.0)', 
+          gridcolor: '#1e293b',
+          range: [0, 2.0]
+        },
+        yaxis: { title: lang === 'en' ? 'Axial Mesh Level (Z-axis)' : 'Eksenel Seviye (Z Ekseni)', gridcolor: '#1e293b' },
+        margin: { l: 50, r: 20, t: 40, b: 40 },
+        height: 280
+      }
+    };
+  }, [simulationResults, lang]);
 
   const entropyPlot = useMemo(() => {
     if (!simulationResults?.shannon_entropy) return null;
@@ -709,37 +985,131 @@ export default function Dashboard() {
     };
   }, [simulationResults, zMapType]);
 
+  // Microscopic Cross Sections Plotly configuration
+  const xsPlot = useMemo(() => {
+    if (!xsData || !xsData[selectedXsNuclide]) return null;
+    const nucData = xsData[selectedXsNuclide];
+    const traces = [];
+    
+    if (nucData.fission) {
+      traces.push({
+        x: nucData.energy,
+        y: nucData.fission,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Fission (σf)',
+        line: { color: '#ef4444', width: 2 }
+      });
+    }
+    if (nucData.capture) {
+      traces.push({
+        x: nucData.energy,
+        y: nucData.capture,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Capture (σγ)',
+        line: { color: '#38bdf8', width: 2 }
+      });
+    }
+    if (nucData.scatter) {
+      traces.push({
+        x: nucData.energy,
+        y: nucData.scatter,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Elastic Scatter (σs)',
+        line: { color: '#10b981', width: 1.5 }
+      });
+    }
+    
+    return {
+      data: traces,
+      layout: {
+        title: `${selectedXsNuclide} Microscopic Cross-Sections`,
+        xaxis: {
+          title: 'Neutron Energy (eV)',
+          type: 'log',
+          gridcolor: '#1e293b'
+        },
+        yaxis: {
+          title: 'Cross Section (barns)',
+          type: 'log',
+          gridcolor: '#1e293b'
+        },
+        margin: { l: 60, r: 20, t: 40, b: 50 },
+        height: 360,
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#cbd5e1' }
+      }
+    };
+  }, [xsData, selectedXsNuclide]);
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#0b0f19]">
+    <div className={`min-h-screen flex flex-col ${theme === 'dark' ? 'bg-[#0b0f19]' : 'bg-slate-50'}`}>
       {/* Platform Header */}
       <header className="app-header">
         <div className="app-title-group">
           <Shield className="w-8 h-8 text-sky-400" />
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-100">OpenMC SMR Neutronics Platform</h1>
-            <p className="text-xs text-slate-400">Civilian SMR Fuel Assembly Parametric Simulation Dashboard</p>
+            <h1 className="text-xl font-bold tracking-tight text-slate-100">{t('appTitle')}</h1>
+            <p className="text-xs text-slate-400">{t('appSub')}</p>
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {/* Main platform Mode tabs */}
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-lg p-1 flex gap-1 shadow-inner">
             <button 
               className={`tab-btn ${mainTab === 'simulation' ? 'active' : ''}`}
               onClick={() => setMainTab('simulation')}
             >
-              <Cpu className="w-3.5 h-3.5" /> Simulation
+              <Cpu className="w-3.5 h-3.5" /> {t('simulation')}
             </button>
             <button 
               className={`tab-btn ${mainTab === 'dataset' ? 'active' : ''}`}
               onClick={() => setMainTab('dataset')}
             >
-              <Database className="w-3.5 h-3.5" /> Dataset Gen
+              <Database className="w-3.5 h-3.5" /> {t('datasetGen')}
             </button>
           </div>
           
-          <div className="app-badge flex items-center gap-1.5 border border-sky-500/20 bg-sky-500/5 px-3 py-1.5 rounded-lg text-xs font-semibold text-sky-400">
-            <Compass className="w-4 h-4 animate-spin-slow" /> OpenMC 0.15.3 WSL Active
+          {/* Language Toggle Switch (Sliding) */}
+          <div className="switch-container mx-1" title="Switch Language / Dili Değiştir">
+            <Globe className="w-3.5 h-3.5 text-sky-400" />
+            <span className="text-[10px] font-bold text-slate-400">TR</span>
+            <label className="toggle-switch">
+              <input 
+                type="checkbox" 
+                checked={lang === 'en'} 
+                onChange={toggleLang} 
+              />
+              <span className="toggle-slider"></span>
+            </label>
+            <span className="text-[10px] font-bold text-slate-400">EN</span>
+          </div>
+
+          {/* Theme Toggle Switch (Sliding) */}
+          <div className="switch-container mx-1" title="Toggle Dark/Light Mode">
+            {theme === 'dark' ? (
+              <Moon className="w-3.5 h-3.5 text-sky-400" />
+            ) : (
+              <Sun className="w-3.5 h-3.5 text-amber-400" />
+            )}
+            <span className="text-[10px] font-bold text-slate-400">{lang === 'en' ? 'Light' : 'Aydınlık'}</span>
+            <label className="toggle-switch">
+              <input 
+                type="checkbox" 
+                checked={theme === 'dark'} 
+                onChange={toggleTheme} 
+              />
+              <span className="toggle-slider"></span>
+            </label>
+            <span className="text-[10px] font-bold text-slate-400">{lang === 'en' ? 'Dark' : 'Karanlık'}</span>
+          </div>
+
+          <div className="app-badge hidden xl:flex items-center gap-1.5 border border-sky-500/20 bg-sky-500/5 px-3 py-1.5 rounded-lg text-xs font-semibold text-sky-400">
+            <Compass className="w-4 h-4 animate-spin-slow" /> {t('openmcActive')}
           </div>
         </div>
       </header>
@@ -750,17 +1120,18 @@ export default function Dashboard() {
         {/* Left Parameter configurator Panel */}
         <section className="panel flex flex-col gap-6 h-fit max-h-[85vh] overflow-y-auto">
           <div className="panel-header">
-            <h2 className="panel-title"><Settings className="w-4 h-4 text-sky-400" /> Assembly Configurator</h2>
+            <h2 className="panel-title"><Settings className="w-4 h-4 text-sky-400" /> {t('configurator')}</h2>
             <select
               value={activePreset}
               onChange={(e) => handlePresetChange(e.target.value)}
-              className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-sky-400 font-semibold"
+              className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-sky-400 font-semibold cursor-pointer"
             >
-              <option value="NuScale">NuScale Preset</option>
-              <option value="SMR-160">SMR-160 Preset</option>
-              <option value="CAREM-25">CAREM-25 Preset</option>
-              <option value="mPower">mPower Preset</option>
-              <option value="Custom">Custom / Modified</option>
+              <option value="NuScale">NuScale {t('preset')}</option>
+              <option value="SMR-160">SMR-160 {t('preset')}</option>
+              <option value="CAREM-25">CAREM-25 {t('preset')}</option>
+              <option value="SMART">SMART {t('preset')}</option>
+              <option value="BEAVRS">BEAVRS {t('preset')}</option>
+              <option value="Custom">{lang === 'en' ? 'Custom / Modified' : 'Özel / Değiştirilmiş'}</option>
             </select>
           </div>
 
@@ -770,19 +1141,19 @@ export default function Dashboard() {
               onClick={() => setConfigTab('geometry')}
               className={`flex-1 pb-2 text-center text-xs font-bold transition-all ${configTab === 'geometry' ? 'border-b-2 border-sky-400 text-sky-400' : 'text-slate-500 hover:text-slate-400'}`}
             >
-              Geometry
+              {lang === 'en' ? 'Geometry' : 'Geometri'}
             </button>
             <button
               onClick={() => setConfigTab('materials')}
               className={`flex-1 pb-2 text-center text-xs font-bold transition-all ${configTab === 'materials' ? 'border-b-2 border-sky-400 text-sky-400' : 'text-slate-500 hover:text-slate-400'}`}
             >
-              Materials
+              {lang === 'en' ? 'Materials' : 'Malzemeler'}
             </button>
             <button
               onClick={() => setConfigTab('simulation')}
               className={`flex-1 pb-2 text-center text-xs font-bold transition-all ${configTab === 'simulation' ? 'border-b-2 border-sky-400 text-sky-400' : 'text-slate-500 hover:text-slate-400'}`}
             >
-              Simulation
+              {lang === 'en' ? 'Engine' : 'Motor'}
             </button>
             <button
               onClick={() => setConfigTab('advanced')}
@@ -797,20 +1168,20 @@ export default function Dashboard() {
             {configTab === 'geometry' && (
               <>
                 <div className="form-group">
-                  <label className="form-label">Lattice Matrix Type</label>
+                  <label className="form-label">{t('latticeType')}</label>
                   <select
                     value={params.lattice_type}
                     onChange={(e) => handleParamChange('lattice_type', e.target.value)}
                     className="form-select text-slate-200"
                   >
-                    <option value="Square">Square Lattice (17x17)</option>
-                    <option value="Hexagonal">Hexagonal Lattice (127-pin)</option>
+                    <option value="Square">{lang === 'en' ? 'Square Lattice (17x17)' : 'Kare Dizilim (17x17)'}</option>
+                    <option value="Hexagonal">{lang === 'en' ? 'Hexagonal Lattice (127-pin)' : 'Altıgen Dizilim (127-Pin)'}</option>
                   </select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="form-group">
-                    <label className="form-label">Active Height (cm)</label>
+                    <label className="form-label">{t('activeHeight')}</label>
                     <input
                       type="number"
                       value={params.active_height}
@@ -819,7 +1190,7 @@ export default function Dashboard() {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Pin Pitch (cm)</label>
+                    <label className="form-label">{t('pinPitch')}</label>
                     <input
                       type="number"
                       step="0.001"
@@ -832,7 +1203,7 @@ export default function Dashboard() {
 
                 <div className="grid grid-cols-2 gap-4 border-t border-slate-800/60 pt-4">
                   <div className="form-group">
-                    <label className="form-label">Pellet Radius (cm)</label>
+                    <label className="form-label">{t('fuelPelletRadius')}</label>
                     <input
                       type="number"
                       step="0.0001"
@@ -842,7 +1213,7 @@ export default function Dashboard() {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Clad Outer Rad (cm)</label>
+                    <label className="form-label">{t('cladOuterRadius')}</label>
                     <input
                       type="number"
                       step="0.0001"
@@ -855,7 +1226,7 @@ export default function Dashboard() {
 
                 <div className="grid grid-cols-2 gap-4 border-t border-slate-800/60 pt-4">
                   <div className="form-group">
-                    <label className="form-label">Guide Tube Inner (cm)</label>
+                    <label className="form-label">{t('guideTubeInner')}</label>
                     <input
                       type="number"
                       step="0.0001"
@@ -865,7 +1236,7 @@ export default function Dashboard() {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Guide Tube Outer (cm)</label>
+                    <label className="form-label">{t('guideTubeOuter')}</label>
                     <input
                       type="number"
                       step="0.0001"
@@ -882,7 +1253,31 @@ export default function Dashboard() {
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="form-group">
-                    <label className="form-label">U-235 Enrichment (%)</label>
+                    <label className="form-label">Fuel Material Type</label>
+                    <select
+                      value={params.fuel_material}
+                      onChange={(e) => handleParamChange('fuel_material', e.target.value)}
+                      className="form-select text-slate-200"
+                    >
+                      <option value="UO2">UO2 (Standard PWR)</option>
+                      <option value="MOX">MOX (Mixed Oxide)</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Fuel Density (g/cm³)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={params.fuel_density}
+                      onChange={(e) => handleParamChange('fuel_density', parseFloat(e.target.value))}
+                      className="form-control"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                  <div className="form-group">
+                    <label className="form-label">Enrichment (wt %)</label>
                     <input
                       type="number"
                       step="0.1"
@@ -916,6 +1311,8 @@ export default function Dashboard() {
                   >
                     <option value="Zircaloy4">Zircaloy-4 (Standard PWR)</option>
                     <option value="M5">Alloy M5 (Advanced Zr-Nb)</option>
+                    <option value="SS304">SS-304 (Stainless Steel)</option>
+                    <option value="FeCrAl">FeCrAl (ATF Cladding)</option>
                     <option value="Q12">Q12 Cladding</option>
                   </select>
                 </div>
@@ -1013,15 +1410,27 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Coolant Temperature (K)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={params.temperature}
-                    onChange={(e) => handleParamChange('temperature', parseFloat(e.target.value))}
-                    className="form-control"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="form-group">
+                    <label className="form-label">Coolant Temp (K)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={params.temperature}
+                      onChange={(e) => handleParamChange('temperature', parseFloat(e.target.value))}
+                      className="form-control"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Fuel Temp (K)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={params.fuel_temperature}
+                      onChange={(e) => handleParamChange('fuel_temperature', parseFloat(e.target.value))}
+                      className="form-control"
+                    />
+                  </div>
                 </div>
               </>
             )}
@@ -1233,7 +1642,8 @@ export default function Dashboard() {
                       { id: 'flux3d', label: '3D Spatial Mapping', icon: Layers },
                       { id: 'depletion', label: 'Depletion & Burnup', icon: RefreshCw },
                       { id: 'economy', label: 'Neutron Economy', icon: Compass },
-                      { id: 'shielding', label: 'Shielding & DPA', icon: Shield }
+                      { id: 'shielding', label: 'Shielding & DPA', icon: Shield },
+                      { id: 'xs', label: 'Cross-Sections', icon: FileText }
                     ].map(tab => {
                       const Icon = tab.icon;
                       return (
@@ -1252,19 +1662,46 @@ export default function Dashboard() {
                   {/* Core Metrics Tab */}
                   {resultsTab === 'core' && (
                     <>
-                      {/* Results numerical summary cards */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-emerald-400 flex flex-col justify-between">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">k-Effective (Combined)</span>
-                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
-                            {simulationResults?.k_eff?.toFixed(5) ?? "N/A"}
+                      {/* Four K-eff Estimators Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-blue-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === 'en' ? 'Collision k-Effective' : 'Çarpışma k-Etkin'}</span>
+                          <h4 className="text-xl font-bold text-slate-100 mt-2 font-mono">
+                            {simulationResults?.k_collision ? simulationResults.k_collision[0].toFixed(5) : (simulationResults?.k_eff?.toFixed(5) ?? "N/A")}
                           </h4>
-                          <span className="text-[10px] text-slate-500 mt-1">± {simulationResults?.k_eff_std?.toFixed(5) ?? "N/A"} SD</span>
+                          <span className="text-[10px] text-slate-500 mt-1">σ: {simulationResults?.k_collision ? simulationResults.k_collision[1].toFixed(5) : (simulationResults?.k_eff_std?.toFixed(5) ?? "N/A")}</span>
                         </div>
 
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-cyan-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === 'en' ? 'Track-Length k-Effective' : 'Yol-Boyu k-Etkin'}</span>
+                          <h4 className="text-xl font-bold text-slate-100 mt-2 font-mono">
+                            {simulationResults?.k_tracklength ? simulationResults.k_tracklength[0].toFixed(5) : (simulationResults?.k_eff?.toFixed(5) ?? "N/A")}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 mt-1">σ: {simulationResults?.k_tracklength ? simulationResults.k_tracklength[1].toFixed(5) : (simulationResults?.k_eff_std?.toFixed(5) ?? "N/A")}</span>
+                        </div>
+
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-pink-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === 'en' ? 'Absorption k-Effective' : 'Soğurma k-Etkin'}</span>
+                          <h4 className="text-xl font-bold text-slate-100 mt-2 font-mono">
+                            {simulationResults?.k_absorption ? simulationResults.k_absorption[0].toFixed(5) : (simulationResults?.k_eff?.toFixed(5) ?? "N/A")}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 mt-1">σ: {simulationResults?.k_absorption ? simulationResults.k_absorption[1].toFixed(5) : (simulationResults?.k_eff_std?.toFixed(5) ?? "N/A")}</span>
+                        </div>
+
+                        <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-emerald-400 flex flex-col justify-between">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === 'en' ? 'Combined k-Effective (k∞)' : 'Birleşik k-Etkin (k∞)'}</span>
+                          <h4 className="text-xl font-bold text-emerald-400 mt-2 font-mono">
+                            {simulationResults?.k_combined ? simulationResults.k_combined[0].toFixed(5) : (simulationResults?.k_eff?.toFixed(5) ?? "N/A")}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 mt-1">σ: {simulationResults?.k_combined ? simulationResults.k_combined[1].toFixed(5) : (simulationResults?.k_eff_std?.toFixed(5) ?? "N/A")}</span>
+                        </div>
+                      </div>
+
+                      {/* Performance Indicators Grid */}
+                      <div className={`grid grid-cols-2 ${params.poison_enabled ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mb-6`}>
                         <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-sky-400 flex flex-col justify-between">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reactivity (ρ)</span>
-                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('reactivityCard') || 'Excess Reactivity'}</span>
+                          <h4 className="text-xl font-bold text-slate-100 mt-2">
                             {simulationResults?.reactivity?.toFixed(5) ?? "N/A"}
                           </h4>
                           <span className="text-[10px] text-slate-500 mt-1">pcm: {simulationResults?.reactivity !== undefined ? (simulationResults.reactivity * 1e5).toFixed(0) : "N/A"}</span>
@@ -1272,7 +1709,7 @@ export default function Dashboard() {
 
                         <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-purple-400 flex flex-col justify-between">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hot Channel Factor</span>
-                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
+                          <h4 className="text-xl font-bold text-slate-100 mt-2">
                             {simulationResults?.hot_channel_factor?.toFixed(3) ?? "N/A"}
                           </h4>
                           <span className="text-[10px] text-slate-500 mt-1">Safe Limit: &lt; 1.5</span>
@@ -1280,15 +1717,25 @@ export default function Dashboard() {
 
                         <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-amber-400 flex flex-col justify-between">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Peak Power Factor</span>
-                          <h4 className="text-2xl font-bold text-slate-100 mt-2">
+                          <h4 className="text-xl font-bold text-slate-100 mt-2">
                             {simulationResults?.peak_power_factor?.toFixed(3) ?? "N/A"}
                           </h4>
                           <span className="text-[10px] text-slate-500 mt-1">Max Pin / Average Pin</span>
                         </div>
+
+                        {params.poison_enabled && (
+                          <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-rose-500 flex flex-col justify-between">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Poison Penalty (Gd₂O₃)</span>
+                            <h4 className="text-xl font-bold text-rose-450 mt-2 font-mono">
+                              -{((4500 * Math.log(1 + params.poison_fraction))).toFixed(0)} pcm
+                            </h4>
+                            <span className="text-[10px] text-slate-500 mt-1">Gd Fraction: {params.poison_fraction.toFixed(1)} wt%</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* 2D Heatmap & Spectrum Charts */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         {/* Fine mesh spatial heatmap */}
                         {fineMapPlot && (
                           <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
@@ -1304,15 +1751,25 @@ export default function Dashboard() {
                         )}
                       </div>
 
-                      {/* Convergence analysis plots */}
+                      {/* Axial profile & Entropy Convergence curves */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Axial Power Profile Plot */}
+                        {axialPowerPlot && (
+                          <div className="panel bg-[#0e1626]/80 p-4">
+                            <PlotlyChart data={axialPowerPlot.data} layout={axialPowerPlot.layout} />
+                          </div>
+                        )}
+
                         {/* Shannon Entropy Plot */}
                         {entropyPlot && (
                           <div className="panel bg-[#0e1626]/80 p-4">
                             <PlotlyChart data={entropyPlot.data} layout={entropyPlot.layout} />
                           </div>
                         )}
+                      </div>
 
+                      {/* Convergence analysis plots */}
+                      <div className="grid grid-cols-1 gap-6 mt-6">
                         {/* k-eff convergence Plot */}
                         {keffPlot && (
                           <div className="panel bg-[#0e1626]/80 p-4">
@@ -1834,6 +2291,46 @@ export default function Dashboard() {
                     </div>
                   )}
 
+                  {/* Microscopic Cross Sections Tab */}
+                  {resultsTab === 'xs' && (
+                    <div className="flex flex-col gap-6">
+                      <div className="panel flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-200">Isotope Cross-Section Database</h4>
+                          <p className="text-xs text-slate-400 mt-1">
+                            Microscopic cross-sections (σ) in barns vs. incident neutron energy in eV, loaded from the ENDF/B-VII.1 HDF5 nuclear data library.
+                          </p>
+                        </div>
+                        <select
+                          value={selectedXsNuclide}
+                          onChange={(e) => setSelectedXsNuclide(e.target.value)}
+                          className="bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs text-sky-400 font-semibold cursor-pointer"
+                        >
+                          <option value="U235">U-235 (Fissile Fuel)</option>
+                          <option value="U238">U-238 (Fertile Absorber)</option>
+                          <option value="B10">B-10 (Soluble Boron / Absorber)</option>
+                          <option value="H1">H-1 (Moderator Hydrogen)</option>
+                          <option value="Zr90">Zr-90 (Zircaloy Cladding)</option>
+                        </select>
+                      </div>
+
+                      {xsLoading ? (
+                        <div className="panel flex flex-col items-center justify-center p-12 text-slate-400 gap-3">
+                          <RefreshCw className="w-8 h-8 animate-spin text-sky-400" />
+                          <span>Loading ENDF/B-VII.1 libraries...</span>
+                        </div>
+                      ) : xsPlot ? (
+                        <div className="panel bg-[#0e1626]/80 flex items-center justify-center p-4">
+                          <PlotlyChart data={xsPlot.data} layout={xsPlot.layout} />
+                        </div>
+                      ) : (
+                        <div className="panel p-8 text-center text-rose-400 font-semibold">
+                          Could not retrieve nuclear database cross-section records.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 </div>
               )}
             </>
@@ -1853,15 +2350,15 @@ export default function Dashboard() {
                   <div className="flex flex-col gap-4">
                     {/* Enrichment bounds */}
                     <div>
-                      <span className="text-xs font-bold text-slate-300 block mb-2">U-235 Enrichment range (%)</span>
-                      <div className="grid grid-cols-3 gap-2">
+                      <span className="text-xs font-bold text-slate-300 block mb-1.5">U-235 Enrichment range (%)</span>
+                      <div className="grid grid-cols-2 gap-2">
                         <input
                           type="number"
                           step="0.1"
                           placeholder="Min"
                           value={datasetParams.enrichment_min}
                           onChange={(e) => setDatasetParams(p => ({ ...p, enrichment_min: parseFloat(e.target.value) }))}
-                          className="form-control"
+                          className="form-control text-xs"
                         />
                         <input
                           type="number"
@@ -1869,29 +2366,22 @@ export default function Dashboard() {
                           placeholder="Max"
                           value={datasetParams.enrichment_max}
                           onChange={(e) => setDatasetParams(p => ({ ...p, enrichment_max: parseFloat(e.target.value) }))}
-                          className="form-control"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Steps"
-                          value={datasetParams.enrichment_steps}
-                          onChange={(e) => setDatasetParams(p => ({ ...p, enrichment_steps: parseInt(e.target.value) }))}
-                          className="form-control"
+                          className="form-control text-xs"
                         />
                       </div>
                     </div>
 
                     {/* Boron bounds */}
                     <div>
-                      <span className="text-xs font-bold text-slate-300 block mb-2">Coolant Soluble Boron range (ppm)</span>
-                      <div className="grid grid-cols-3 gap-2">
+                      <span className="text-xs font-bold text-slate-300 block mb-1.5">Soluble Boron range (ppm)</span>
+                      <div className="grid grid-cols-2 gap-2">
                         <input
                           type="number"
                           step="100"
                           placeholder="Min"
                           value={datasetParams.boron_min}
                           onChange={(e) => setDatasetParams(p => ({ ...p, boron_min: parseFloat(e.target.value) }))}
-                          className="form-control"
+                          className="form-control text-xs"
                         />
                         <input
                           type="number"
@@ -1899,48 +2389,124 @@ export default function Dashboard() {
                           placeholder="Max"
                           value={datasetParams.boron_max}
                           onChange={(e) => setDatasetParams(p => ({ ...p, boron_max: parseFloat(e.target.value) }))}
-                          className="form-control"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Steps"
-                          value={datasetParams.boron_steps}
-                          onChange={(e) => setDatasetParams(p => ({ ...p, boron_steps: parseInt(e.target.value) }))}
-                          className="form-control"
+                          className="form-control text-xs"
                         />
                       </div>
                     </div>
 
-                    {/* Pitch bounds */}
+                    {/* Fuel Temperature bounds */}
                     <div>
-                      <span className="text-xs font-bold text-slate-300 block mb-2">Pin Pitch range (cm)</span>
-                      <div className="grid grid-cols-3 gap-2">
+                      <span className="text-xs font-bold text-slate-300 block mb-1.5">Fuel Temperature range (K)</span>
+                      <div className="grid grid-cols-2 gap-2">
                         <input
                           type="number"
-                          step="0.01"
+                          step="50"
                           placeholder="Min"
-                          value={datasetParams.pitch_min}
-                          onChange={(e) => setDatasetParams(p => ({ ...p, pitch_min: parseFloat(e.target.value) }))}
-                          className="form-control"
+                          value={datasetParams.fuel_temp_min}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, fuel_temp_min: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
                         />
                         <input
                           type="number"
-                          step="0.01"
+                          step="50"
                           placeholder="Max"
-                          value={datasetParams.pitch_max}
-                          onChange={(e) => setDatasetParams(p => ({ ...p, pitch_max: parseFloat(e.target.value) }))}
-                          className="form-control"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Steps"
-                          value={datasetParams.pitch_steps}
-                          onChange={(e) => setDatasetParams(p => ({ ...p, pitch_steps: parseInt(e.target.value) }))}
-                          className="form-control"
+                          value={datasetParams.fuel_temp_max}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, fuel_temp_max: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
                         />
                       </div>
                     </div>
 
+                    {/* Coolant Temperature bounds */}
+                    <div>
+                      <span className="text-xs font-bold text-slate-300 block mb-1.5">Coolant Temperature range (K)</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          step="10"
+                          placeholder="Min"
+                          value={datasetParams.coolant_temp_min}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, coolant_temp_min: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
+                        />
+                        <input
+                          type="number"
+                          step="10"
+                          placeholder="Max"
+                          value={datasetParams.coolant_temp_max}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, coolant_temp_max: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Poison fraction bounds */}
+                    <div>
+                      <span className="text-xs font-bold text-slate-300 block mb-1.5">Burnable Poison Gd₂O₃ range (wt %)</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          step="0.5"
+                          placeholder="Min"
+                          value={datasetParams.poison_min}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, poison_min: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
+                        />
+                        <input
+                          type="number"
+                          step="0.5"
+                          placeholder="Max"
+                          value={datasetParams.poison_max}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, poison_max: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Cladding thickness bounds */}
+                    <div>
+                      <span className="text-xs font-bold text-slate-300 block mb-1.5">Cladding Thickness range (cm)</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          step="0.005"
+                          placeholder="Min"
+                          value={datasetParams.clad_thick_min}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, clad_thick_min: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
+                        />
+                        <input
+                          type="number"
+                          step="0.005"
+                          placeholder="Max"
+                          value={datasetParams.clad_thick_max}
+                          onChange={(e) => setDatasetParams(p => ({ ...p, clad_thick_max: parseFloat(e.target.value) }))}
+                          className="form-control text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Number of LHS Samples input */}
+                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-col gap-2 mt-2">
+                      <label className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                        <Database className="w-3.5 h-3.5" />
+                        Latin Hypercube Samples (N)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="2000"
+                        value={datasetParams.num_samples}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDatasetParams(p => ({ ...p, num_samples: val === "" ? "" : parseInt(val) }));
+                        }}
+                        className="form-control font-bold text-sky-400 font-mono text-center text-sm"
+                      />
+                      <span className="text-[10px] text-slate-500 italic mt-0.5">
+                        {t('lhsSamplesSub')}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -1948,22 +2514,28 @@ export default function Dashboard() {
                 <div className="flex flex-col justify-between">
                   <div>
                     <div className="panel-header mb-4">
-                      <h3 className="panel-title"><Cpu className="w-4 h-4 text-sky-400" /> Generation Queue</h3>
+                      <h3 className="panel-title"><Cpu className="w-4 h-4 text-sky-400" /> {t('queueTitle')}</h3>
                     </div>
                     
-                    <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-900 mb-6 flex flex-col gap-3">
+                    <div className="bg-slate-955/60 p-4 rounded-xl border border-slate-900 mb-6 flex flex-col gap-3">
                       <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-400 font-medium">Status:</span>
+                        <span className="text-slate-400 font-medium">{t('status')}:</span>
                         <span className={`font-semibold ${datasetStatus.active ? 'text-amber-400' : 'text-slate-500'}`}>
-                          {datasetStatus.active ? 'Generating Cases...' : 'Inactive'}
+                          {datasetStatus.active ? t('statusGenerating') : t('statusInactive')}
                         </span>
                       </div>
 
                       {datasetStatus.active && (
                         <>
-                          <div className="flex justify-between text-[11px] text-slate-500">
-                            <span>Completed: {datasetStatus.completed_cases} / {datasetStatus.total_cases}</span>
-                            <span>{datasetStatus.total_cases > 0 ? ((datasetStatus.completed_cases / datasetStatus.total_cases) * 100).toFixed(0) : 0}%</span>
+                          <div className="flex flex-col gap-1.5 text-xs mb-2">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">{t('completed')}:</span>
+                              <span className="font-mono font-bold text-sky-400">{datasetStatus.completed_cases} / {datasetStatus.total_cases}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">{t('percentage')}:</span>
+                              <span className="font-mono font-bold text-sky-400">{datasetStatus.total_cases > 0 ? ((datasetStatus.completed_cases / datasetStatus.total_cases) * 100).toFixed(0) : 0}%</span>
+                            </div>
                           </div>
                           <div className="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden">
                             <div 
@@ -1974,15 +2546,76 @@ export default function Dashboard() {
                           
                           {/* current params variant */}
                           <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-[10px] font-mono text-slate-400 flex flex-col gap-1 mt-1">
-                            <span className="font-semibold text-slate-200">Current Case Parameters:</span>
-                            <span>• Enrichment: {datasetStatus.current_params.enrichment?.toFixed(2)} %</span>
-                            <span>• Soluble Boron: {datasetStatus.current_params.soluble_boron?.toFixed(0)} ppm</span>
-                            <span>• Pitch: {datasetStatus.current_params.pin_pitch?.toFixed(3)} cm</span>
+                            <span className="font-semibold text-slate-200">{t('currentCase')}:</span>
+                            <span>• {t('enrichment')}: {datasetStatus.current_params.enrichment?.toFixed(2)} wt%</span>
+                            <span>• {t('solubleBoron')}: {datasetStatus.current_params.soluble_boron?.toFixed(0)} ppm</span>
+                            <span>• {t('fuelTemp')}: {datasetStatus.current_params.fuel_temp?.toFixed(0)} K</span>
+                            <span>• {t('coolantTemp')}: {datasetStatus.current_params.coolant_temp?.toFixed(1)} K</span>
+                            <span>• {t('poisonWeight')}: {datasetStatus.current_params.poison_frac?.toFixed(2)} wt%</span>
+                            <span>• {t('cladThickness')}: {datasetStatus.current_params.clad_thick?.toFixed(3)} cm</span>
                           </div>
                         </>
                       )}
                     </div>
+
+                    {/* Control Variables Card */}
+                    <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-900 mt-2 flex flex-col gap-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                        {t('controlVariables')}
+                      </span>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] font-mono text-slate-400">
+                        <div className="flex justify-between">
+                          <span>{t('lattice')}:</span>
+                          <span className="text-sky-400 font-semibold">{params.lattice_type} (17x17)</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('pinPitch') || 'Pin Pitch'}:</span>
+                          <span className="text-slate-200">{params.pin_pitch} cm</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('fuelMaterial') || 'Fuel Material'}:</span>
+                          <span className="text-slate-200">{params.fuel_material}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('cladMaterial') || 'Clad Material'}:</span>
+                          <span className="text-slate-200">{params.clad_material}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('activeHeight') || 'Active Height'}:</span>
+                          <span className="text-slate-200">{params.active_height} cm</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('boundary') || 'Boundary'}:</span>
+                          <span className="text-sky-400 font-semibold">{t('reflective')}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('particles') || 'Particles'}:</span>
+                          <span className="text-slate-200">{params.particles?.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('batches') || 'Batches'}:</span>
+                          <span className="text-slate-200">{params.batches}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{t('inactiveBatches') || 'Inactive'}:</span>
+                          <span className="text-slate-200">{params.inactive_batches}</span>
+                        </div>
+                      </div>
+                      <div className="text-[9px] text-slate-500 italic mt-1 border-t border-slate-800/60 pt-2">
+                        {t('constantsSub')}
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Dynamic Simulation Count Indicator */}
+                  {!datasetStatus.active && (
+                    <div className="bg-sky-950/20 border border-sky-850/40 rounded-xl p-3 text-xs text-slate-300 mt-4 flex justify-between items-center">
+                      <span className="font-semibold text-slate-400">Total LHS Cases to Simulate:</span>
+                      <span className="font-extrabold text-sky-400 font-mono text-sm bg-slate-900/60 px-3 py-1 rounded border border-slate-800">
+                        {(datasetParams.num_samples || 0).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-3 mt-4">
                     {datasetStatus.active ? (
@@ -2013,14 +2646,12 @@ export default function Dashboard() {
               </div>
 
               {/* Informative guidelines */}
-              <div className="panel bg-[#0e1626]/60 border border-amber-500/10 p-5 flex gap-4">
+              <div className="panel bg-amber-500/5 border border-amber-500/20 p-5 flex gap-4 mt-4">
                 <AlertTriangle className="w-8 h-8 text-amber-500 shrink-0" />
                 <div className="text-xs leading-relaxed">
-                  <h4 className="font-bold text-amber-500 mb-1">Dataset Generation Mode Alert</h4>
+                  <h4 className="font-bold text-amber-500 mb-1">{t('alertTitle')}</h4>
                   <p className="text-slate-400">
-                    Dataset generation mode sweeps across combinations of enrichment, soluble boron, and pitch. 
-                    To ensure rapid execution, the platform automatically overrides particle count to 2,000 and batches to 25. 
-                    This creates optimized, fast Monte Carlo executions that construct input-to-output surrogate datasets suitable for training Machine Learning, Deep Learning, and optimization study models.
+                    {t('alertSub')}
                   </p>
                 </div>
               </div>

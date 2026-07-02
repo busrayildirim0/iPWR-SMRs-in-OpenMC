@@ -82,19 +82,30 @@ class SimulationParams(BaseModel):
     shielding_enabled: bool = False
     economy_enabled: bool = False
     flux_3d_enabled: bool = False
+    fuel_material: str = "UO2"
+    fuel_density: float = 10.42
+    fuel_temperature: float = 900.0
 
 class DatasetGenParams(BaseModel):
     enrichment_min: float = 2.0
     enrichment_max: float = 5.0
-    enrichment_steps: int = 4
     
     boron_min: float = 0.0
     boron_max: float = 2000.0
-    boron_steps: int = 4
     
-    pitch_min: float = 1.20
-    pitch_max: float = 1.35
-    pitch_steps: int = 4
+    fuel_temp_min: float = 600.0
+    fuel_temp_max: float = 1200.0
+    
+    coolant_temp_min: float = 500.0
+    coolant_temp_max: float = 600.0
+    
+    poison_min: float = 0.0
+    poison_max: float = 8.0
+    
+    clad_thick_min: float = 0.03
+    clad_thick_max: float = 0.08
+    
+    num_samples: int = 50
     
     # default base settings for other parameters
     base_params: SimulationParams
@@ -182,7 +193,10 @@ def run_simulation_thread(job_id, run_dir, params: SimulationParams):
             depletion_enabled=params.depletion_enabled,
             shielding_enabled=params.shielding_enabled,
             economy_enabled=params.economy_enabled,
-            flux_3d_enabled=params.flux_3d_enabled
+            flux_3d_enabled=params.flux_3d_enabled,
+            fuel_material=params.fuel_material,
+            fuel_density=params.fuel_density,
+            fuel_temperature=params.fuel_temperature
         )
         
         jobs[job_id]["status"] = "running"
@@ -451,36 +465,87 @@ integrator.integrate()
 def run_dataset_generation_thread(job_id, params: DatasetGenParams):
     global dataset_generator_state
     
-    # Calculate parameter ranges
+    import random
     import numpy as np
     
-    enrichments = np.linspace(params.enrichment_min, params.enrichment_max, params.enrichment_steps)
-    borons = np.linspace(params.boron_min, params.boron_max, params.boron_steps)
-    pitches = np.linspace(params.pitch_min, params.pitch_max, params.pitch_steps)
+    n_samples = params.num_samples
     
+    # Ranges lists:
+    # 0: enrichment
+    # 1: soluble boron
+    # 2: fuel temp
+    # 3: coolant temp
+    # 4: poison fraction
+    # 5: cladding thickness
+    ranges = [
+        (params.enrichment_min, params.enrichment_max),
+        (params.boron_min, params.boron_max),
+        (params.fuel_temp_min, params.fuel_temp_max),
+        (params.coolant_temp_min, params.coolant_temp_max),
+        (params.poison_min, params.poison_max),
+        (params.clad_thick_min, params.clad_thick_max)
+    ]
+    
+    # Generate LHS intervals
+    intervals = []
+    for min_val, max_val in ranges:
+        intervals.append(np.linspace(min_val, max_val, n_samples + 1))
+        
+    # Shuffle interval indices independently for each parameter to remove correlations
+    perms = [list(range(n_samples)) for _ in range(6)]
+    for p in perms:
+        random.shuffle(p)
+        
     cases = []
-    for e in enrichments:
-        for b in borons:
-            for p in pitches:
-                cases.append((float(e), float(b), float(p)))
+    for i in range(n_samples):
+        valid = False
+        attempt = 0
+        while not valid and attempt < 100:
+            vals = []
+            for d in range(6):
+                int_idx = perms[d][i]
+                min_v = intervals[d][int_idx]
+                max_v = intervals[d][int_idx + 1]
+                vals.append(random.uniform(min_v, max_v))
                 
+            ct_thick = vals[5]
+            test_clad_radius = params.base_params.gap_radius + ct_thick
+            if test_clad_radius < (params.base_params.pin_pitch / 2.0):
+                cases.append(vals)
+                valid = True
+            else:
+                attempt += 1
+                
+        if not valid:
+            # Fallback if no valid interval combination was found after 100 retries
+            fallback_valid = False
+            while not fallback_valid:
+                vals = []
+                for d in range(6):
+                    vals.append(random.uniform(ranges[d][0], ranges[d][1]))
+                ct_thick = vals[5]
+                test_clad_radius = params.base_params.gap_radius + ct_thick
+                if test_clad_radius < (params.base_params.pin_pitch / 2.0):
+                    cases.append(vals)
+                    fallback_valid = True
+                    
     dataset_generator_state["active"] = True
     dataset_generator_state["total_cases"] = len(cases)
     dataset_generator_state["completed_cases"] = 0
     dataset_generator_state["job_id"] = job_id
     
-    # Prepare CSV file headers if not exists
-    if not os.path.exists(DATASET_PATH):
-        df_empty = pd.DataFrame(columns=[
-            "lattice_type", "pin_pitch", "enrichment", "soluble_boron", 
-            "clad_material", "poison_enabled", "poison_fraction", 
-            "control_rod_state", "control_rod_material", "particles", "batches",
-            "k_eff", "k_eff_std", "reactivity", "peak_power_factor"
-        ])
-        df_empty.to_csv(DATASET_PATH, index=False)
+    # Prepare fresh CSV file (always overwrite existing dataset to start clean)
+    df_empty = pd.DataFrame(columns=[
+        "lattice_type", "pin_pitch", "fuel_material", "clad_material",
+        "enrichment", "soluble_boron", "fuel_temperature", "coolant_temperature", 
+        "coolant_density", "cladding_thickness", "poison_fraction",
+        "control_rod_state", "control_rod_material", "particles", "batches",
+        "k_eff", "k_eff_std", "reactivity", "peak_power_factor"
+    ])
+    df_empty.to_csv(DATASET_PATH, index=False)
         
     # Execute sequential cases
-    for idx, (e, b, p) in enumerate(cases):
+    for idx, (e, b, ft, ct, p_frac, ct_thick) in enumerate(cases):
         if not dataset_generator_state["active"]:
             # Stopped by user
             break
@@ -488,22 +553,26 @@ def run_dataset_generation_thread(job_id, params: DatasetGenParams):
         case_dir = os.path.join(RUNS_DIR, f"dataset_case_{idx}")
         dataset_generator_state["completed_cases"] = idx
         dataset_generator_state["current_params"] = {
-            "enrichment": e,
-            "soluble_boron": b,
-            "pin_pitch": p
+            "enrichment": round(e, 4),
+            "soluble_boron": round(b, 4),
+            "fuel_temp": round(ft, 4),
+            "coolant_temp": round(ct, 4),
+            "poison_frac": round(p_frac, 4),
+            "clad_thick": round(ct_thick, 4)
         }
         
         # Copy base params and adjust variant values
         case_params = params.base_params.model_copy()
         case_params.enrichment = e
         case_params.soluble_boron = b
-        case_params.pin_pitch = p
-        
-        # We can run dataset cases with lower particle counts to ensure high performance
-        # e.g., override particles and batches for fast screening
-        case_params.particles = min(case_params.particles, 2000)
-        case_params.batches = min(case_params.batches, 25)
-        case_params.inactive_batches = min(case_params.inactive_batches, 5)
+        case_params.fuel_temperature = ft
+        case_params.temperature = ct
+        case_params.poison_fraction = p_frac
+        if p_frac > 0.0:
+            case_params.poison_enabled = True
+        else:
+            case_params.poison_enabled = False
+        case_params.clad_radius = case_params.gap_radius + ct_thick
         
         try:
             # 1. Generate XML
@@ -527,7 +596,10 @@ def run_dataset_generation_thread(job_id, params: DatasetGenParams):
                 particles=case_params.particles,
                 batches=case_params.batches,
                 inactive_batches=case_params.inactive_batches,
-                temperature=case_params.temperature
+                temperature=case_params.temperature,
+                fuel_material=case_params.fuel_material,
+                fuel_density=case_params.fuel_density,
+                fuel_temperature=case_params.fuel_temperature
             )
             
             # 2. Run OpenMC
@@ -554,23 +626,32 @@ def run_dataset_generation_thread(job_id, params: DatasetGenParams):
             # 3. Parse results
             res = parse_openmc_results(case_dir, case_params.lattice_type)
             
+            # Calculate coolant density
+            t_ref = 566.5
+            d_ref = 0.740582
+            c_density = max(0.1, d_ref - 0.0015 * (ct - t_ref))
+            
             # Append result row to dataset CSV
             new_row = {
                 "lattice_type": case_params.lattice_type,
-                "pin_pitch": case_params.pin_pitch,
-                "enrichment": case_params.enrichment,
-                "soluble_boron": case_params.soluble_boron,
+                "pin_pitch": round(case_params.pin_pitch, 4),
+                "fuel_material": case_params.fuel_material,
                 "clad_material": case_params.clad_material,
-                "poison_enabled": case_params.poison_enabled,
-                "poison_fraction": case_params.poison_fraction,
+                "enrichment": round(case_params.enrichment, 4),
+                "soluble_boron": round(case_params.soluble_boron, 4),
+                "fuel_temperature": round(case_params.fuel_temperature, 4),
+                "coolant_temperature": round(case_params.temperature, 4),
+                "coolant_density": round(c_density, 4),
+                "cladding_thickness": round(ct_thick, 4),
+                "poison_fraction": round(case_params.poison_fraction, 4),
                 "control_rod_state": case_params.control_rod_state,
                 "control_rod_material": case_params.control_rod_material,
                 "particles": case_params.particles,
                 "batches": case_params.batches,
-                "k_eff": res["k_eff"],
-                "k_eff_std": res["k_eff_std"],
-                "reactivity": res["reactivity"],
-                "peak_power_factor": res["peak_power_factor"]
+                "k_eff": round(res["k_eff"], 6),
+                "k_eff_std": round(res["k_eff_std"], 6),
+                "reactivity": round(res["reactivity"], 6),
+                "peak_power_factor": round(res["peak_power_factor"], 4)
             }
             
             df = pd.DataFrame([new_row])
@@ -601,19 +682,27 @@ def get_presets():
         "NuScale": {
             "lattice_type": "Square",
             "active_height": 200.0,
-            "pin_pitch": 1.25984,
-            "fuel_radius": 0.39218,
-            "gap_radius": 0.40005,
-            "clad_radius": 0.45720,
-            "gt_inner_radius": 0.56134,
-            "gt_outer_radius": 0.60198,
-            "enrichment": 4.5,
-            "soluble_boron": 975.0,
+            "pin_pitch": 1.2598,
+            "fuel_radius": 0.4057,
+            "gap_radius": 0.4140,
+            "clad_radius": 0.4750,
+            "gt_inner_radius": 0.5715,
+            "gt_outer_radius": 0.6121,
+            "enrichment": 4.55,
+            "soluble_boron": 1000.0,
             "clad_material": "Zircaloy4",
             "poison_enabled": False,
             "poison_fraction": 2.0,
             "control_rod_state": "Fully Withdrawn",
-            "control_rod_material": "Ag-In-Cd"
+            "control_rod_material": "Ag-In-Cd",
+            "fuel_material": "UO2",
+            "fuel_density": 10.52,
+            "fuel_temperature": 900.0,
+            "temperature": 600.0,
+            "particles": 10000,
+            "batches": 200,
+            "inactive_batches": 50,
+            "boundary_type": "Reflective"
         },
         "CAREM-25": {
             "lattice_type": "Hexagonal",
@@ -622,49 +711,98 @@ def get_presets():
             "fuel_radius": 0.380,
             "gap_radius": 0.3875,
             "clad_radius": 0.450,
-            "gt_inner_radius": 0.380,
-            "gt_outer_radius": 0.450,
+            "gt_inner_radius": 0.350,
+            "gt_outer_radius": 0.425,
             "enrichment": 3.1,
             "soluble_boron": 0.0,
             "clad_material": "Zircaloy4",
             "poison_enabled": False,
             "poison_fraction": 2.0,
             "control_rod_state": "Fully Withdrawn",
-            "control_rod_material": "Ag-In-Cd"
+            "control_rod_material": "Ag-In-Cd",
+            "fuel_material": "UO2",
+            "fuel_density": 10.412,
+            "fuel_temperature": 573.15,
+            "temperature": 573.15,
+            "particles": 10000,
+            "batches": 200,
+            "inactive_batches": 50,
+            "boundary_type": "Reflective"
         },
         "SMR-160": {
             "lattice_type": "Square",
-            "active_height": 365.0,
-            "pin_pitch": 1.25984,
-            "fuel_radius": 0.39218,
+            "active_height": 365.76,
+            "pin_pitch": 1.2598,
+            "fuel_radius": 0.3922,
             "gap_radius": 0.40005,
-            "clad_radius": 0.45720,
+            "clad_radius": 0.4572,
             "gt_inner_radius": 0.56134,
             "gt_outer_radius": 0.60198,
-            "enrichment": 4.5,
-            "soluble_boron": 600.0,
+            "enrichment": 4.50,
+            "soluble_boron": 1000.0,
             "clad_material": "M5",
             "poison_enabled": False,
             "poison_fraction": 2.0,
             "control_rod_state": "Fully Withdrawn",
-            "control_rod_material": "Ag-In-Cd"
+            "control_rod_material": "Ag-In-Cd",
+            "fuel_material": "UO2",
+            "fuel_density": 10.42,
+            "fuel_temperature": 900.0,
+            "temperature": 580.0,
+            "particles": 10000,
+            "batches": 200,
+            "inactive_batches": 50,
+            "boundary_type": "Reflective"
         },
-        "mPower": {
+        "SMART": {
             "lattice_type": "Square",
-            "active_height": 241.3,
+            "active_height": 200.0,
+            "pin_pitch": 1.20,
+            "fuel_radius": 0.4465,
+            "gap_radius": 0.4550,
+            "clad_radius": 0.4750,
+            "gt_inner_radius": 0.520,
+            "gt_outer_radius": 0.560,
+            "enrichment": 4.80,
+            "soluble_boron": 0.0,
+            "clad_material": "Zircaloy4",
+            "poison_enabled": False,
+            "poison_fraction": 2.0,
+            "control_rod_state": "Fully Withdrawn",
+            "control_rod_material": "Ag-In-Cd",
+            "fuel_material": "UO2",
+            "fuel_density": 10.97,
+            "fuel_temperature": 1200.0,
+            "temperature": 600.0,
+            "particles": 10000,
+            "batches": 200,
+            "inactive_batches": 50,
+            "boundary_type": "Reflective"
+        },
+        "BEAVRS": {
+            "lattice_type": "Square",
+            "active_height": 365.76,
             "pin_pitch": 1.25984,
             "fuel_radius": 0.39218,
             "gap_radius": 0.40005,
             "clad_radius": 0.45720,
             "gt_inner_radius": 0.56134,
             "gt_outer_radius": 0.60198,
-            "enrichment": 4.95,
-            "soluble_boron": 0.0,
-            "clad_material": "M5",
-            "poison_enabled": True,
-            "poison_fraction": 3.0,
+            "enrichment": 3.10,
+            "soluble_boron": 378.0,
+            "clad_material": "Zircaloy4",
+            "poison_enabled": False,
+            "poison_fraction": 2.0,
             "control_rod_state": "Fully Withdrawn",
-            "control_rod_material": "B4C"
+            "control_rod_material": "Ag-In-Cd",
+            "fuel_material": "UO2",
+            "fuel_density": 10.30,
+            "fuel_temperature": 900.0,
+            "temperature": 580.0,
+            "particles": 10000,
+            "batches": 200,
+            "inactive_batches": 50,
+            "boundary_type": "Reflective"
         }
     }
 
@@ -728,6 +866,40 @@ def download_dataset():
     if not os.path.exists(DATASET_PATH):
         raise HTTPException(status_code=404, detail="Dataset file not found. Generate one first.")
     return FileResponse(path=DATASET_PATH, media_type="text/csv", filename="smr_generated_dataset.csv")
+
+@app.get("/api/nuclear-data/xs")
+def get_cross_sections():
+    import openmc.data
+    import numpy as np
+    
+    XS_LIB_PATH = "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml"
+    if not os.path.exists(XS_LIB_PATH):
+        raise HTTPException(status_code=500, detail="Nuclear data library not found in WSL path")
+        
+    try:
+        lib = openmc.data.DataLibrary.from_xml(XS_LIB_PATH)
+        results = {}
+        e_grid = np.logspace(-5, 7.3, 200) # 200 energy points from 1e-5 eV to 2e7 eV
+        
+        for nuc in ['U235', 'U238', 'B10', 'H1', 'Zr90']:
+            d = lib.get_by_material(nuc)
+            if d:
+                n_data = openmc.data.IncidentNeutron.from_hdf5(d['path'])
+                results[nuc] = {
+                    'energy': [float(e) for e in e_grid]
+                }
+                
+                # Check for reactions
+                # 18: Fission, 102: Capture, 2: Elastic Scattering
+                for mt, label in [(18, 'fission'), (102, 'capture'), (2, 'scatter')]:
+                    if mt in n_data.reactions:
+                        xs_dict = n_data.reactions[mt].xs
+                        temp = '294K' if '294K' in xs_dict else list(xs_dict.keys())[0]
+                        results[nuc][label] = [float(xs_dict[temp](e)) for e in e_grid]
+                        
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading nuclear data: {str(e)}")
 
 # Mount frontend files (will serve the built React files from platform/frontend/dist)
 FRONTEND_DIST = os.path.join(os.path.dirname(BACKEND_DIR), "frontend", "dist")
