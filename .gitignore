@@ -1,0 +1,34 @@
+# Python Cache
+__pycache__/
+*.pyc
+
+# IDEs
+.vs/
+.idea/
+*.suo
+*.user
+
+# Simulation Runs and dynamic outputs
+runs/
+*.h5
+*.out
+statepoint*
+summary.h5
+tallies.*
+generated_dataset.csv
+ipwr_dataset.csv
+
+# Frontend Dependencies
+node_modules/
+
+# C++ Build outputs (Geant4 compilations)
+build/
+bin/
+*.o
+*.a
+beavrs_assembly
+beavrs_assembly.exe
+
+# OS generated files
+.DS_Store
+Thumbs.db

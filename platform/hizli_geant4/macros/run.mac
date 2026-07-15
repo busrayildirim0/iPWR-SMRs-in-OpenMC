@@ -1,0 +1,49 @@
+# ===== File: run.mac =====
+# BEAVRS Assembly Batch Run Macro
+#----------------------------------------------------------------------------
+
+# Verbosity
+# /control/verbose 1
+# /run/verbose 1
+# /event/verbose 0
+# /tracking/verbose 0
+
+# ---- Reproducibility ----
+# Fixed seeds make a run repeatable; comment out for a fresh random sequence.
+/random/setSeeds 12345 67890
+
+# ---- Material configuration (MUST be set before /run/initialize) ----
+# Defaults are the BEAVRS reference values; override here for parameter studies
+# (e.g. boron worth, Doppler / fuel-temperature coefficient).
+/beavrs/mat/boronPPM             975.0
+/beavrs/mat/enrichment           0.031
+/beavrs/mat/fuelTemperature      900 kelvin
+/beavrs/mat/moderatorTemperature 566.5 kelvin
+/beavrs/mat/moderatorDensity     0.740582 g/cm3
+
+# Initialize (builds geometry + materials)
+/run/initialize
+
+# ---- Output ----
+/beavrs/output/fileName beavrs_output
+/beavrs/output/fileType root
+/beavrs/output/verbose 0
+
+# ---- Boundary conditions ----
+# Mirror boundaries turn the single assembly into an infinite lattice so the
+# reported k approximates k_inf. Set both to false for a bare (leaky) assembly.
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial  true
+
+# ---- Primary Generator Settings ----
+# Number of fission neutrons per event (more neutrons -> better statistics)
+/beavrs/gun/neutronsPerEvent 10
+
+# Print progress every 100 events
+/run/printProgress 100
+
+# Scoring (flux spectrum, fuel edep, thermalization) is written to the
+# configured output file automatically at the end of the run.
+
+# Run simulation (1000 events x 10 neutrons = 10,000 source neutrons)
+/run/beamOn 1000

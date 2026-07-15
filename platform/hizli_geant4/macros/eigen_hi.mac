@@ -1,0 +1,22 @@
+# macros/eigen_hi.mac
+# Higher-statistics k-eigenvalue run: tighter k_eff and a clearer view of the
+# inter-generation correlation discussed in the README.
+#
+# 2000 * 8 = 16000 source neutrons/generation, 20 inactive + 80 active = 100
+# generations. Expect ~25-30 min on a multi-core machine. The per-generation k
+# error roughly halves vs eigen.mac and the 80-cycle average tightens the mean.
+
+/random/setSeeds 24680 13579
+/run/initialize
+
+/beavrs/output/fileName beavrs_eigen_hi
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial  true
+/beavrs/gun/neutronsPerEvent 8
+
+/run/printProgress 1000000
+
+/beavrs/eigen/inactive  20
+/beavrs/eigen/active    80
+/beavrs/eigen/histories 2000
+/beavrs/eigen/run
