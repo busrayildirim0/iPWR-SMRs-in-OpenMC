@@ -29,31 +29,38 @@ Platform, yüksek performanslı bilimsel hesaplamaları modern ve akıcı bir ku
 Projenin dizin yapısı backend ve frontend kodlarının modüler kalmasını sağlayacak şekilde düzenlenmiştir:
 
 ```text
-SMRs modeling and analysis/
+📁 SMR_Analysis_Platform/
 │
-├── platform/
-│   ├── backend/
-│   │   ├── runs/                   # Her simülasyonun (run_{id}) XML ve çıktı dosyalarının tutulduğu dizin
-│   │   ├── main.py                 # FastAPI sunucusu, API yönlendirmeleri, WSL/OpenMC tetikleme ve log akışı
-│   │   ├── model_generator.py      # Parametrik girdileri alıp OpenMC XML modellerine dönüştüren geometri motoru
-│   │   ├── results_parser.py       # Simülasyon sonu oluşan HDF5 statepoint çıktısını okuyan veri ayrıştırıcı
-│   │   ├── test_backend.py         # Backend fonksiyonlarının doğruluğunu test eden entegrasyon scripti
-│   │   └── generated_dataset.csv   # Parametre süpürmeleri sonucu biriken veri seti CSV dosyası
+├── 📁 platform/                   (Analiz ve Görselleştirme Platformu)
+│   ├── 📁 backend/                (FastAPI API Sunucusu)
+│   │   ├── main.py                (Uygulama ve API Endpoint'leri)
+│   │   ├── model_generator.py     (Girdi Üretimi: OpenMC XML & Geant4 Makroları)
+│   │   └── results_parser.py      (Çıktı İşleme ve Veri Normalizasyonu)
 │   │
-│   └── frontend/
-│       ├── dist/                   # Vite tarafından derlenmiş ve FastAPI'nin doğrudan sunduğu statik web dosyaları
-│       ├── src/
-│       │   ├── components/
-│       │   │   ├── Dashboard.jsx           # Ana state yönetimi, formlar, log terminali ve grafiklerin entegrasyonu
-│       │   │   ├── AssemblyVisualizer.jsx  # SVG tabanlı 2D yakıt demeti çizimi ve ısı haritası katmanları
-│       │   │   └── PlotlyChart.jsx         # Plotly.js kütüphanesini React yaşam döngüsüne bağlayan köprü
-│       │   ├── App.jsx             # React ana bileşen sarmalayıcısı
-│       │   ├── main.jsx            # React başlatma noktası
-│       │   └── index.css           # Camgöbeği (glassmorphic) koyu tema ve yerleşim CSS kuralları
-│       ├── package.json            # Proje bağımlılıkları ve derleme komutları
-│       └── vite.config.js          # Vite derleyici ayarları
+│   └── 📁 frontend/               (React & Plotly.js Arayüzü)
+│       └── 📁 src/
+│           ├── 📁 components/     (Dashboard, AssemblyVisualizer, PlotlyChart)
+│           ├── App.jsx            (Ana Uygulama Bileşeni)
+│           └── main.jsx           (Entry Point)
 │
-└── proje_detaylari.md              # Bu dökümantasyon dosyası
+├── 📁 geant4/                     (Geant4 Fizik ve Navigasyon Çekirdeği)
+│   ├── 📁 include/                (Header Dosyaları)
+│   └── 📁 src/                    (C++ Fizik ve Skorlama Katmanı)
+│       ├── DetectorConstruction.cc(Geometri Tanımları)
+│       ├── SteppingAction.cc      (Skorlama ve Yansıtıcı Sınır Koşulları)
+│       ├── RunAction.cc           (İstatistiksel Veri Toplama)
+│       ├── FissionBank.cc         (Eigenvalue İterasyon ve Entropi)
+│       ├── Materials.cc           (Nükleer Malzeme Kütüphanesi)
+│       └── ReactorConfig.cc       (SMR Konfigürasyon Yönetimi)
+│
+├── 📁 benchmark_notebooks/        (Validasyon ve Referans Çalışmaları)
+│   ├── NuScale.ipynb
+│   ├── CAREM-25.ipynb
+│   ├── SMR-160.ipynb
+│   ├── mPower.ipynb
+│   └── BEAVRS.ipynb
+│
+└── 📁 scripts/                    (Otomasyon ve Veri İşleme Betikleri)
 ```
 
 ---
