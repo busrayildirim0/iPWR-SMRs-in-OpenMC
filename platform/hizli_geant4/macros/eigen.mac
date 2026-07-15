@@ -1,0 +1,31 @@
+# macros/eigen.mac
+# k-eigenvalue (criticality) power iteration for the BEAVRS 17x17 assembly.
+#
+# One generation == one /run/beamOn. The fission bank carries the fission
+# source from each generation to the next; the first `inactive` generations are
+# discarded while the spatial source settles toward the fundamental mode (watch
+# the Shannon entropy H stabilise), then `active` generations are averaged into
+#   k_eff +/- standard error.
+#
+# Source neutrons per generation = histories * neutronsPerEvent.
+# Here: 1000 * 8 = 8000 source neutrons/generation, 15 + 35 = 50 generations.
+# Runtime is on the order of several minutes on a multi-core machine.
+#
+#   Quick test  : inactive 10 / active 20 / histories 500   (~2 min)
+#   Production  : inactive 25 / active 75 / histories 2000   (tighter k_eff)
+
+/random/setSeeds 12345 67890
+/run/initialize
+
+/beavrs/output/fileName beavrs_eigen
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial  true
+/beavrs/gun/neutronsPerEvent 8
+
+# Suppress Geant4's per-event progress banner: one line per generation is enough.
+/run/printProgress 1000000
+
+/beavrs/eigen/inactive  50
+/beavrs/eigen/active    150
+/beavrs/eigen/histories 1250
+/beavrs/eigen/run

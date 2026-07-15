@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  smr-platform:
+    build: .
+    container_name: smr-platform-container
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the nuclear cross section data directory from host to container.
+      # Update the left side of the colon to match the path of your local cross sections directory.
+      # Example WSL: - /home/busra/openmc_project:/data
+      # Example Windows: - C:/Users/Hp/openmc_project:/data
+      - /home/busra/openmc_project:/data
+      
+      # Mount the backend run files to the host for persistence and easy log viewing
+      - ./platform/backend/runs:/app/platform/backend/runs
+    environment:
+      # Env variable pointing to cross sections config inside the mounted /data folder
+      - OPENMC_CROSS_SECTIONS=/data/endfb-vii.1-hdf5/cross_sections.xml
+    restart: always

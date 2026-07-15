@@ -1,0 +1,20 @@
+# macros/smr160.mac
+# Holtec SMR-160 - square 17x17, M5 clad, 4.5% enrichment, 1000 ppm boron,
+# fuel 365.76 cm, coolant 580 K. Control rods fully withdrawn (water tubes).
+
+/random/setSeeds 12345 67890
+
+/smr/reactor/preset SMR160
+/run/initialize
+
+/beavrs/output/fileName smr160_eigen
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial  true
+/beavrs/gun/neutronsPerEvent 8
+/run/printProgress 1000000
+
+# 1250 x 8 = 10000 source neutrons/generation; 50 inactive + 150 active = 200
+/beavrs/eigen/inactive  50
+/beavrs/eigen/active    150
+/beavrs/eigen/histories 1250
+/beavrs/eigen/run

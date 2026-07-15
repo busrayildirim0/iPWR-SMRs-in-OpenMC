@@ -1,0 +1,13 @@
+# ===== File: smoke.mac =====
+# Fast sanity run for build/runtime verification.
+#----------------------------------------------------------------------------
+
+/random/setSeeds 1 2
+# Material commands must precede /run/initialize.
+/beavrs/mat/fuelTemperature 900 kelvin
+/run/initialize
+/beavrs/output/fileName smoke_output
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial true
+/beavrs/gun/neutronsPerEvent 1
+/run/beamOn 2

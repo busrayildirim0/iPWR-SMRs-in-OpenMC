@@ -1,0 +1,21 @@
+# macros/carem25.mac
+# CNEA CAREM-25 - hexagonal 127-pin lattice, Zircaloy-4 clad, 3.1% enrichment,
+# 0 ppm boron, fuel/coolant 573.15 K, 19 guide tubes. Reflective hexagonal
+# boundary (apothem = 6.5 * pitch).
+
+/random/setSeeds 12345 67890
+
+/smr/reactor/preset CAREM25
+/run/initialize
+
+/beavrs/output/fileName carem25_fast
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial  true
+/beavrs/gun/neutronsPerEvent 8
+/run/printProgress 1000000
+
+# 500 x 8 = 4000 source neutrons/generation; 30 inactive + 100 active = 130
+/beavrs/eigen/inactive  30
+/beavrs/eigen/active    100
+/beavrs/eigen/histories 500
+/beavrs/eigen/run

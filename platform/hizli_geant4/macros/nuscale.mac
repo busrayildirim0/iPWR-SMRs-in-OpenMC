@@ -1,0 +1,20 @@
+# macros/nuscale.mac
+# NuScale iPWR - square 17x17, M5 clad, 4.55% enrichment, 1000 ppm boron,
+# fuel 200 cm, coolant 600 K. Preset must be selected BEFORE /run/initialize.
+
+/random/setSeeds 12345 67890
+
+/smr/reactor/preset NuScale
+/run/initialize
+
+/beavrs/output/fileName nuscale_eigen
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial  true
+/beavrs/gun/neutronsPerEvent 8
+/run/printProgress 1000000
+
+# 1250 x 8 = 10000 source neutrons/generation; 50 inactive + 150 active = 200
+/beavrs/eigen/inactive  50
+/beavrs/eigen/active    150
+/beavrs/eigen/histories 1250
+/beavrs/eigen/run

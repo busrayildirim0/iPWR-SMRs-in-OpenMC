@@ -116,7 +116,8 @@ const getSimplifiedLogs = (rawLogs, params) => {
       const inactiveMatch = trimmed.match(/\[eigen\] gen\s+(\d+)\s+inactive/);
       if (activeMatch) {
         const activeIdx = parseInt(activeMatch[1]);
-        currentBatch = Math.max(currentBatch, activeIdx);
+        const inactiveOffset = params?.inactive_batches || 10;
+        currentBatch = Math.max(currentBatch, inactiveOffset + activeIdx);
         hasG4Progress = true;
       } else if (inactiveMatch) {
         const inactiveIdx = parseInt(inactiveMatch[1]);
@@ -153,11 +154,11 @@ const getSimplifiedLogs = (rawLogs, params) => {
 
 const localizations = {
   en: {
-    appTitle: "OpenMC & Geant4 SMR Neutronics Platform",
+    appTitle: "OpenMC SMR Neutronics Platform",
     appSub: "Civilian SMR Fuel Assembly Parametric Simulation Dashboard",
     simulation: "Simulation",
     datasetGen: "Dataset Gen",
-    openmcActive: "OpenMC & Geant4 Solvers Active",
+    openmcActive: "OpenMC 0.15.3 WSL Active",
     configurator: "Assembly Configurator",
     preset: "Preset",
     geometrySettings: "Geometry & Lattice",
@@ -233,13 +234,13 @@ const localizations = {
     cladThickness: "Clad Thickness"
   },
   tr: {
-    appTitle: "OpenMC & Geant4 SMR Nötronik Platformu",
+    appTitle: "OpenMC SMR Nötronik Platformu",
     appSub: "Sivil SMR Yakıt Demeti Parametrik Simülasyon Paneli",
     simulation: "Simülasyon",
     enrichment: "U-235 Zenginliği",
     cladThickness: "Kaplama Kalınlığı",
     datasetGen: "Veri Seti Üret",
-    openmcActive: "OpenMC ve Geant4 Çözücüleri Aktif",
+    openmcActive: "OpenMC 0.15.3 WSL Aktif",
     configurator: "Demet Konfigüratörü",
     preset: "Şablon",
     geometrySettings: "Geometri ve Dizilim",
@@ -315,8 +316,22 @@ const localizations = {
 };
 
 export default function Dashboard() {
-  const theme = 'dark';
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [lang, setLang] = useState(() => localStorage.getItem('lang') || 'tr');
+
+  useEffect(() => {
+    if (theme === 'light') {
+      document.body.classList.add('light-theme');
+    } else {
+      document.body.classList.remove('light-theme');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    localStorage.setItem('theme', nextTheme);
+  };
   
   const toggleLang = () => {
     const nextLang = lang === 'en' ? 'tr' : 'en';
@@ -364,7 +379,7 @@ export default function Dashboard() {
     fuel_density: 10.42,
     fuel_temperature: 900.0,
     run_openmc: true,
-    run_geant4: true,
+    run_geant4: false,
     g4_k_only: false
   });
 
@@ -443,7 +458,7 @@ export default function Dashboard() {
             fuel_density: 10.42,
             fuel_temperature: 900.0,
             run_openmc: true,
-            run_geant4: true,
+            run_geant4: false,
             g4_k_only: false,
             ...data.NuScale
           });
@@ -481,14 +496,10 @@ export default function Dashboard() {
           .then(res => res.json())
           .then(data => {
             setDatasetStatus(prev => {
-              if (prev.active && !data.active && data.job_id && (data.job_id === prev.job_id || !prev.job_id) && alertedJobIdRef.current !== data.job_id) {
+              if (prev.active && !data.active && data.job_id && alertedJobIdRef.current !== data.job_id) {
                 alertedJobIdRef.current = data.job_id;
                 setTimeout(() => {
-                  if (data.status === 'stopped') {
-                    alert(lang === 'en' ? "Dataset Generation stopped." : "Veri seti üretimi durduruldu.");
-                  } else {
-                    alert(lang === 'en' ? "Dataset Generation completed!" : "Veri seti üretimi tamamlandı!");
-                  }
+                  alert(lang === 'en' ? "Dataset Generation completed!" : "Veri seti üretimi tamamlandı!");
                 }, 50);
               }
               return data;
@@ -521,8 +532,8 @@ export default function Dashboard() {
         fuel_material: 'UO2',
         fuel_density: 10.42,
         fuel_temperature: 900.0,
-        run_openmc: true,
-        run_geant4: true,
+        run_openmc: prev.run_openmc !== undefined ? prev.run_openmc : true,
+        run_geant4: prev.run_geant4 !== undefined ? prev.run_geant4 : false,
         g4_k_only: prev.g4_k_only !== undefined ? prev.g4_k_only : false,
         ...presets[name]
       }));
@@ -659,7 +670,6 @@ export default function Dashboard() {
     const dParams = {
       ...datasetParams,
       num_samples: parseInt(datasetParams.num_samples) || 10,
-      reactor_preset: activePreset,
       base_params: params
     };
     
@@ -668,19 +678,13 @@ export default function Dashboard() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dParams)
     })
-      .then(res => {
-        if (!res.ok) {
-          return res.json().then(err => { throw new Error(err.detail || "Server error"); });
-        }
-        return res.json();
-      })
+      .then(res => res.json())
       .then(data => {
         setDatasetStatus(prev => ({
           ...prev,
           active: true,
-          total_cases: dParams.num_samples,
-          completed_cases: 0,
-          job_id: data.job_id
+          total_cases: 100, // placeholder, will refresh on poll
+          completed_cases: 0
         }));
       })
       .catch(err => alert("Error starting dataset generation: " + err.message));
@@ -812,34 +816,9 @@ export default function Dashboard() {
   };
 
   const getEntropyPlot = (res, title, color, markerColor) => {
-    if (!res?.shannon_entropy || res.shannon_entropy.length === 0) return null;
-    const inactiveCount = res.inactive_batches || 0;
-    const shapes = inactiveCount > 0 ? [{
-      type: 'line',
-      xref: 'x',
-      yref: 'paper',
-      x0: inactiveCount + 0.5,
-      y0: 0,
-      x1: inactiveCount + 0.5,
-      y1: 1,
-      line: { color: '#ef4444', width: 1.5, dash: 'dash' }
-    }] : [];
-    const annotations = inactiveCount > 0 ? [{
-      x: inactiveCount + 0.5,
-      y: 0.9,
-      xref: 'x',
-      yref: 'paper',
-      text: 'Active Cycles Begin',
-      showarrow: false,
-      textangle: -90,
-      xanchor: 'right',
-      yanchor: 'top',
-      font: { color: '#ef4444', size: 9 }
-    }] : [];
-
+    if (!res?.shannon_entropy) return null;
     return {
       data: [{
-        x: Array.from({ length: res.shannon_entropy.length }, (_, i) => i + 1),
         y: res.shannon_entropy,
         type: 'scatter',
         mode: 'lines+markers',
@@ -850,47 +829,20 @@ export default function Dashboard() {
       layout: {
         title: title,
         xaxis: { title: 'Batch (Generation)', gridcolor: '#3A3E45' },
-        yaxis: { title: 'Entropy H (bits)', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Entropy H', gridcolor: '#3A3E45' },
         margin: { l: 45, r: 15, t: 35, b: 35 },
         height: 240,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
-        font: { color: '#F5F5F5' },
-        shapes,
-        annotations
+        font: { color: '#F5F5F5' }
       }
     };
   };
 
   const getKeffPlot = (res, title, color) => {
-    if (!res?.batch_keff || res.batch_keff.length === 0) return null;
-    const inactiveCount = res.inactive_batches || 0;
-    const shapes = inactiveCount > 0 ? [{
-      type: 'line',
-      xref: 'x',
-      yref: 'paper',
-      x0: inactiveCount + 0.5,
-      y0: 0,
-      x1: inactiveCount + 0.5,
-      y1: 1,
-      line: { color: '#ef4444', width: 1.5, dash: 'dash' }
-    }] : [];
-    const annotations = inactiveCount > 0 ? [{
-      x: inactiveCount + 0.5,
-      y: 0.9,
-      xref: 'x',
-      yref: 'paper',
-      text: 'Active Cycles Begin',
-      showarrow: false,
-      textangle: -90,
-      xanchor: 'right',
-      yanchor: 'top',
-      font: { color: '#ef4444', size: 9 }
-    }] : [];
-
+    if (!res?.batch_keff) return null;
     return {
       data: [{
-        x: Array.from({ length: res.batch_keff.length }, (_, i) => i + 1),
         y: res.batch_keff,
         type: 'scatter',
         mode: 'lines',
@@ -905,9 +857,7 @@ export default function Dashboard() {
         height: 240,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
-        font: { color: '#F5F5F5' },
-        shapes,
-        annotations
+        font: { color: '#F5F5F5' }
       }
     };
   };
@@ -978,13 +928,11 @@ export default function Dashboard() {
           </div>
 
           <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-orange-400 flex flex-col justify-between rounded-[10px]">
-            <span className="text-[10px] font-bold text-[#A0A7B4] uppercase tracking-wider">Source Shannon Entropy</span>
+            <span className="text-[10px] font-bold text-[#A0A7B4] uppercase tracking-wider">Max Pin / Average Pin</span>
             <h4 className="text-lg font-bold text-[#F5F5F5] mt-2 font-mono">
-              {engineData?.shannon_entropy && engineData.shannon_entropy.length > 0 
-                ? `${engineData.shannon_entropy[engineData.shannon_entropy.length - 1].toFixed(4)} bits` 
-                : "N/A"}
+              {engineData?.peak_power_factor?.toFixed(3) ?? "N/A"}
             </h4>
-            <span className="text-[10px] text-[#7A828F] mt-1">Grid: 17x17 (Max: 8.175)</span>
+            <span className="text-[10px] text-[#7A828F] mt-1">Peak Ratio</span>
           </div>
         </div>
       </div>
@@ -1022,12 +970,12 @@ export default function Dashboard() {
         xaxis: {
           title: 'Energy (eV)',
           type: 'log',
-          gridcolor: '#1e293b'
+          gridcolor: '#3A3E45'
         },
         yaxis: {
           title: 'Flux (neutrons/cm²-s)',
           type: 'log',
-          gridcolor: '#1e293b'
+          gridcolor: '#3A3E45'
         },
         margin: { l: 60, r: 20, t: 40, b: 50 },
         height: 280
@@ -1052,10 +1000,10 @@ export default function Dashboard() {
         title: lang === 'en' ? 'Normalized Axial Power Profile' : 'Normalize Eksenel Güç Profili',
         xaxis: { 
           title: lang === 'en' ? 'Relative Power (normalized to average)' : 'Göreceli Güç (ortalama = 1.0)', 
-          gridcolor: '#1e293b',
+          gridcolor: '#3A3E45',
           range: [0, 2.0]
         },
-        yaxis: { title: lang === 'en' ? 'Axial Mesh Level (Z-axis)' : 'Eksenel Seviye (Z Ekseni)', gridcolor: '#1e293b' },
+        yaxis: { title: lang === 'en' ? 'Axial Mesh Level (Z-axis)' : 'Eksenel Seviye (Z Ekseni)', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 280
       }
@@ -1076,8 +1024,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: 'Shannon Entropy (Source Convergence)',
-        xaxis: { title: 'Batch (Generation)', gridcolor: '#1e293b' },
-        yaxis: { title: 'Entropy H', gridcolor: '#1e293b' },
+        xaxis: { title: 'Batch (Generation)', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Entropy H', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 240
       }
@@ -1097,8 +1045,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: 'Batch-by-Batch k-effective Evolution',
-        xaxis: { title: 'Batch', gridcolor: '#1e293b' },
-        yaxis: { title: 'k-eff', gridcolor: '#1e293b' },
+        xaxis: { title: 'Batch', gridcolor: '#3A3E45' },
+        yaxis: { title: 'k-eff', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 240
       }
@@ -1138,8 +1086,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: title,
-        xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
-        yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+        xaxis: { title: 'X-Index', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Y-Index', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 380
       }
@@ -1167,8 +1115,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: 'k-Effective Depletion Curve',
-        xaxis: { title: 'Time (Days)', gridcolor: '#1e293b' },
-        yaxis: { title: 'k-eff', gridcolor: '#1e293b' },
+        xaxis: { title: 'Time (Days)', gridcolor: '#3A3E45' },
+        yaxis: { title: 'k-eff', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 280
       }
@@ -1207,8 +1155,8 @@ export default function Dashboard() {
       ],
       layout: {
         title: 'Fission Product Poisons & Actinide Evolution',
-        xaxis: { title: 'Time (Days)', gridcolor: '#1e293b' },
-        yaxis: { title: 'Atom Concentration (atoms/b-cm)', type: 'log', gridcolor: '#1e293b' },
+        xaxis: { title: 'Time (Days)', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Atom Concentration (atoms/b-cm)', type: 'log', gridcolor: '#3A3E45' },
         margin: { l: 65, r: 20, t: 40, b: 40 },
         height: 280
       }
@@ -1230,8 +1178,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: `3D Mesh Slice Z-${zSliceIndex + 1} (${zMapType === 'power' ? 'Power' : 'Flux'})`,
-        xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
-        yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+        xaxis: { title: 'X-Index', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Y-Index', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 380
       }
@@ -1251,8 +1199,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: 'Biological Dose Rate Map (Sv/h)',
-        xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
-        yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+        xaxis: { title: 'X-Index', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Y-Index', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 380
       }
@@ -1309,8 +1257,7 @@ export default function Dashboard() {
       }],
       layout: {
         title: 'Global Reaction Rates (reactions/s)',
-        xaxis: { title: 'Reaction Channel', gridcolor: '#1e293b' },
-        yaxis: { type: 'log', title: 'Rate (log scale)', gridcolor: '#1e293b' },
+        yaxis: { type: 'log', title: 'Rate (log scale)', gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 280,
         paper_bgcolor: 'rgba(0,0,0,0)',
@@ -1353,8 +1300,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: `Axial ${zMapType === 'power' ? 'Power' : 'Flux'} Profile`,
-        xaxis: { title: 'Average Value', gridcolor: '#1e293b' },
-        yaxis: { title: 'Axial Layer (Z)', tickvals: heights, gridcolor: '#1e293b' },
+        xaxis: { title: 'Average Value', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Axial Layer (Z)', tickvals: heights, gridcolor: '#3A3E45' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 380
       }
@@ -1405,12 +1352,12 @@ export default function Dashboard() {
         xaxis: {
           title: 'Neutron Energy (eV)',
           type: 'log',
-          gridcolor: '#1e293b'
+          gridcolor: '#3A3E45'
         },
         yaxis: {
           title: 'Cross Section (barns)',
           type: 'log',
-          gridcolor: '#1e293b'
+          gridcolor: '#3A3E45'
         },
         margin: { l: 60, r: 20, t: 40, b: 50 },
         height: 360,
@@ -1465,81 +1412,102 @@ export default function Dashboard() {
             <span className="text-[10px] font-bold text-slate-400">EN</span>
           </div>
 
-
-
-
+          {/* Theme Toggle Switch (Sliding) */}
+          <div className="switch-container mx-1" title="Toggle Dark/Light Mode">
+            {theme === 'dark' ? (
+              <Moon className="w-3.5 h-3.5 text-sky-400" />
+            ) : (
+              <Sun className="w-3.5 h-3.5 text-amber-400" />
+            )}
+            <span className="text-[10px] font-bold text-slate-400">{lang === 'en' ? 'Light' : 'Aydınlık'}</span>
+            <label className="toggle-switch">
+              <input 
+                type="checkbox" 
+                checked={theme === 'dark'} 
+                onChange={toggleTheme} 
+              />
+              <span className="toggle-slider"></span>
+            </label>
+            <span className="text-[10px] font-bold text-slate-400">{lang === 'en' ? 'Dark' : 'Karanlık'}</span>
+          </div>
         </div>
       </header>
 
-      {/* Main Grid Section */}
-      <main className="dashboard-grid flex-1 w-full max-w-[1800px] gap-6 p-6">
+      {/* Main Container */}
+      <main className="flex flex-col flex-1 w-full max-w-[1800px] gap-5 px-6 pt-5 pb-8 mx-auto">
         
-        {/* Left Parameter configurator Panel */}
-        <section className="panel flex flex-col gap-6 h-fit max-h-[85vh] overflow-y-auto">
-          <div className="panel-header">
-            <h2 className="panel-title"><Settings className="w-4 h-4 text-sky-400" /> {t('configurator')}</h2>
-            <select
-              value={activePreset}
-              onChange={(e) => handlePresetChange(e.target.value)}
-              className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-sky-400 font-semibold cursor-pointer"
-            >
-              <option value="NuScale">NuScale {t('preset')}</option>
-              <option value="SMR-160">SMR-160 {t('preset')}</option>
-              <option value="CAREM-25">CAREM-25 {t('preset')}</option>
-              <option value="SMART">SMART {t('preset')}</option>
-              <option value="BEAVRS">BEAVRS {t('preset')}</option>
-              <option value="Custom">{lang === 'en' ? 'Custom / Modified' : 'Özel / Değiştirilmiş'}</option>
-            </select>
-          </div>
+        {/* ============================================================ */}
+        {/* FLOATING CONFIGURATOR PANEL — centered, premium */}
+        {/* ============================================================ */}
+        <div className="flex justify-center w-full">
+        <section style={{
+          background: 'linear-gradient(145deg, #1e2029 0%, #1a1d24 100%)',
+          border: '1px solid #3A3E45',
+          borderRadius: '24px',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.45), 0 0 0 1px rgba(45,212,191,0.06), inset 0 1px 0 rgba(255,255,255,0.04)',
+          backdropFilter: 'blur(20px)',
+          padding: '20px 24px 22px',
+          width: '100%',
+          maxWidth: '1400px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px'
+        }}>
+          {/* Configurator Header Row */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', borderBottom: '1px solid #2a2d35', paddingBottom: '14px' }}>
+            {/* Title + Preset */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#2DD4BF', boxShadow: '0 0 8px #2DD4BF' }} />
+                <h2 style={{ fontSize: '0.875rem', fontWeight: 700, color: '#F5F5F5', letterSpacing: '0.05em', margin: 0 }}>Assembly Configurator</h2>
+              </div>
+              <select
+                value={activePreset}
+                onChange={(e) => handlePresetChange(e.target.value)}
+                style={{ background: '#0d0f14', border: '1px solid #3A3E45', borderRadius: '10px', padding: '5px 12px', fontSize: '11px', color: '#2DD4BF', fontWeight: 600, cursor: 'pointer', outline: 'none' }}
+              >
+                <option value="NuScale">NuScale {t('preset')}</option>
+                <option value="SMR-160">SMR-160 {t('preset')}</option>
+                <option value="CAREM-25">CAREM-25 {t('preset')}</option>
+                <option value="SMART">SMART {t('preset')}</option>
+                <option value="BEAVRS">BEAVRS {t('preset')}</option>
+                <option value="Custom">{lang === 'en' ? 'Custom / Modified' : 'Özel / Değiştirilmiş'}</option>
+              </select>
+            </div>
 
-          {/* Config sub-tabs */}
-          <div className="flex bg-slate-955/50 p-1 rounded-xl border border-slate-900 gap-1.5 mb-2 w-full overflow-hidden shrink-0">
-            <button
-              onClick={() => setConfigTab('geometry')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-center text-[10px] font-extrabold transition-all whitespace-nowrap border ${
-                configTab === 'geometry' 
-                  ? 'bg-[#0F3F36] text-[#F5F5F5] border-[rgba(45,212,191,0.35)] shadow-[0_3px_0_#07221d,inset_0_1px_0_rgba(255,255,255,0.15),0_2px_4px_rgba(0,0,0,0.25)] -translate-y-[1px]' 
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50 -translate-y-0 shadow-none'
-              }`}
-            >
-              {lang === 'en' ? 'Geometry' : 'Geometri'}
-            </button>
-            <button
-              onClick={() => setConfigTab('materials')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-center text-[10px] font-extrabold transition-all whitespace-nowrap border ${
-                configTab === 'materials' 
-                  ? 'bg-[#0F3F36] text-[#F5F5F5] border-[rgba(45,212,191,0.35)] shadow-[0_3px_0_#07221d,inset_0_1px_0_rgba(255,255,255,0.15),0_2px_4px_rgba(0,0,0,0.25)] -translate-y-[1px]' 
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50 -translate-y-0 shadow-none'
-              }`}
-            >
-              {lang === 'en' ? 'Materials' : 'Malzeme'}
-            </button>
-            <button
-              onClick={() => setConfigTab('simulation')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-center text-[10px] font-extrabold transition-all whitespace-nowrap border ${
-                configTab === 'simulation' 
-                  ? 'bg-[#0F3F36] text-[#F5F5F5] border-[rgba(45,212,191,0.35)] shadow-[0_3px_0_#07221d,inset_0_1px_0_rgba(255,255,255,0.15),0_2px_4px_rgba(0,0,0,0.25)] -translate-y-[1px]' 
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50 -translate-y-0 shadow-none'
-              }`}
-            >
-              {lang === 'en' ? 'Engine' : 'Motor'}
-            </button>
-            <button
-              onClick={() => setConfigTab('advanced')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-center text-[10px] font-extrabold transition-all whitespace-nowrap border ${
-                configTab === 'advanced' 
-                  ? 'bg-[#0F3F36] text-[#F5F5F5] border-[rgba(45,212,191,0.35)] shadow-[0_3px_0_#07221d,inset_0_1px_0_rgba(255,255,255,0.15),0_2px_4px_rgba(0,0,0,0.25)] -translate-y-[1px]' 
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50 -translate-y-0 shadow-none'
-              }`}
-            >
-              {lang === 'en' ? 'Advanced' : 'Gelişmiş'}
-            </button>
+            {/* Config Pill Tabs */}
+            <div style={{ display: 'flex', gap: '4px', background: '#0d0f14', borderRadius: '14px', padding: '4px', border: '1px solid #2a2d35' }}>
+              {['geometry', 'materials', 'simulation', 'advanced'].map(tab => {
+                const labels = { geometry: lang === 'en' ? 'Geometry' : 'Geometri', materials: lang === 'en' ? 'Materials' : 'Malzemeler', simulation: lang === 'en' ? 'Simulation' : 'Simülasyon', advanced: 'Advanced' };
+                const isActive = configTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setConfigTab(tab)}
+                    style={{
+                      padding: '6px 16px',
+                      borderRadius: '10px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      border: isActive ? '1px solid rgba(45,212,191,0.45)' : '1px solid transparent',
+                      background: isActive ? 'linear-gradient(135deg, rgba(45,212,191,0.15) 0%, rgba(45,212,191,0.05) 100%)' : 'transparent',
+                      color: isActive ? '#2DD4BF' : '#7A828F',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      boxShadow: isActive ? '0 0 12px rgba(45,212,191,0.2), inset 0 1px 0 rgba(255,255,255,0.05)' : 'none',
+                    }}
+                  >
+                    {labels[tab]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Tab parameters details */}
-          <div className="flex-1 flex flex-col gap-4">
+          <div className="w-full">
             {configTab === 'geometry' && (
-              <>
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 pt-1">
                 <div className="form-group">
                   <label className="form-label">{t('latticeType')}</label>
                   <select
@@ -1551,130 +1519,115 @@ export default function Dashboard() {
                     <option value="Hexagonal">{lang === 'en' ? 'Hexagonal Lattice (127-pin)' : 'Altıgen Dizilim (127-Pin)'}</option>
                   </select>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="form-group">
-                    <label className="form-label">{t('activeHeight')}</label>
-                    <input
-                      type="number"
-                      value={params.active_height}
-                      onChange={(e) => handleParamChange('active_height', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">{t('pinPitch')}</label>
-                    <input
-                      type="number"
-                      step="0.001"
-                      value={params.pin_pitch}
-                      onChange={(e) => handleParamChange('pin_pitch', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">{t('activeHeight')}</label>
+                  <input
+                    type="number"
+                    value={params.active_height}
+                    onChange={(e) => handleParamChange('active_height', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4 border-t border-slate-800/60 pt-4">
-                  <div className="form-group">
-                    <label className="form-label">{t('fuelPelletRadius')}</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={params.fuel_radius}
-                      onChange={(e) => handleParamChange('fuel_radius', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">{t('cladOuterRadius')}</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={params.clad_radius}
-                      onChange={(e) => handleParamChange('clad_radius', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">{t('pinPitch')}</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={params.pin_pitch}
+                    onChange={(e) => handleParamChange('pin_pitch', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4 border-t border-slate-800/60 pt-4">
-                  <div className="form-group">
-                    <label className="form-label">{t('guideTubeInner')}</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={params.gt_inner_radius}
-                      onChange={(e) => handleParamChange('gt_inner_radius', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">{t('guideTubeOuter')}</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={params.gt_outer_radius}
-                      onChange={(e) => handleParamChange('gt_outer_radius', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">{t('fuelPelletRadius')}</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={params.fuel_radius}
+                    onChange={(e) => handleParamChange('fuel_radius', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
                 </div>
-              </>
+                <div className="form-group">
+                  <label className="form-label">{t('cladOuterRadius')}</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={params.clad_radius}
+                    onChange={(e) => handleParamChange('clad_radius', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('guideTubeInner')}</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={params.gt_inner_radius}
+                    onChange={(e) => handleParamChange('gt_inner_radius', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('guideTubeOuter')}</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={params.gt_outer_radius}
+                    onChange={(e) => handleParamChange('gt_outer_radius', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
+                </div>
+              </div>
             )}
 
             {configTab === 'materials' && (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="form-group">
-                    <label className="form-label">Fuel Material Type</label>
-                    <select
-                      value={params.fuel_material}
-                      onChange={(e) => handleParamChange('fuel_material', e.target.value)}
-                      className="form-select text-slate-200"
-                    >
-                      <option value="UO2">UO2 (Standard PWR)</option>
-                      <option value="MOX">MOX (Mixed Oxide)</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Fuel Density (g/cm³)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={params.fuel_density}
-                      onChange={(e) => handleParamChange('fuel_density', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 pt-1">
+                <div className="form-group">
+                  <label className="form-label">Fuel Material Type</label>
+                  <select
+                    value={params.fuel_material}
+                    onChange={(e) => handleParamChange('fuel_material', e.target.value)}
+                    className="form-select text-slate-200"
+                  >
+                    <option value="UO2">UO2 (Standard PWR)</option>
+                    <option value="MOX">MOX (Mixed Oxide)</option>
+                  </select>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div className="form-group">
-                    <label className="form-label">Enrichment (wt %)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="2.0"
-                      max="5.0"
-                      value={params.enrichment}
-                      onChange={(e) => handleParamChange('enrichment', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Boron Conc. (ppm)</label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      max="2000"
-                      value={params.soluble_boron}
-                      onChange={(e) => handleParamChange('soluble_boron', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">Fuel Density (g/cm³)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={params.fuel_density}
+                    onChange={(e) => handleParamChange('fuel_density', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
                 </div>
-
+                <div className="form-group">
+                  <label className="form-label">Enrichment (wt %)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="2.0"
+                    max="5.0"
+                    value={params.enrichment}
+                    onChange={(e) => handleParamChange('enrichment', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Boron Conc. (ppm)</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="2000"
+                    value={params.soluble_boron}
+                    onChange={(e) => handleParamChange('soluble_boron', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
+                </div>
                 <div className="form-group">
                   <label className="form-label">Cladding Material</label>
                   <select
@@ -1689,8 +1642,7 @@ export default function Dashboard() {
                     <option value="Q12">Q12 Cladding</option>
                   </select>
                 </div>
-
-                <div className="border-t border-slate-800/60 pt-4 flex flex-col gap-4">
+                <div className="form-group flex flex-col justify-end pb-2">
                   <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
@@ -1699,58 +1651,35 @@ export default function Dashboard() {
                       onChange={(e) => handleParamChange('poison_enabled', e.target.checked)}
                       className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
                     />
-                    <label htmlFor="poison_enabled" className="text-xs font-semibold text-slate-300">
-                      Enable Burnable Poison (Gd₂O₃)
+                    <label htmlFor="poison_enabled" className="text-xs font-semibold text-slate-300 cursor-pointer">
+                      Enable Poison (Gd₂O₃)
                     </label>
                   </div>
-
-                  {params.poison_enabled && (
-                    <div className="form-group">
-                      <label className="form-label">Gd₂O₃ Weight Fraction (%)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0.1"
-                        max="10.0"
-                        value={params.poison_fraction}
-                        onChange={(e) => handleParamChange('poison_fraction', parseFloat(e.target.value))}
-                        className="form-control"
-                      />
-                    </div>
-                  )}
                 </div>
-
-                <div className="border-t border-slate-800/60 pt-4">
+                {params.poison_enabled ? (
                   <div className="form-group">
-                    <label className="form-label">Control Rod State</label>
-                    <select
-                      value={params.control_rod_state}
-                      onChange={(e) => handleParamChange('control_rod_state', e.target.value)}
-                      className="form-select text-slate-200"
-                    >
-                      <option value="Fully Withdrawn">Fully Withdrawn (Water filled)</option>
-                      <option value="Fully Inserted">Fully Inserted</option>
-                      <option value="Partially Inserted">Partially Inserted (50% depth)</option>
-                    </select>
+                    <label className="form-label">Gd₂O₃ Fraction (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="10.0"
+                      value={params.poison_fraction}
+                      onChange={(e) => handleParamChange('poison_fraction', parseFloat(e.target.value))}
+                      className="form-control"
+                    />
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Absorber Material</label>
-                    <select
-                      value={params.control_rod_material}
-                      onChange={(e) => handleParamChange('control_rod_material', e.target.value)}
-                      className="form-select text-slate-200"
-                    >
-                      <option value="Ag-In-Cd">Silver-Indium-Cadmium (Ag-In-Cd)</option>
-                      <option value="B4C">Boron Carbide (B₄C)</option>
-                      <option value="Hafnium">Hafnium Metal</option>
-                    </select>
+                ) : (
+                  <div className="form-group hidden lg:block opacity-0 pointer-events-none">
+                    <label className="form-label">Placeholder</label>
+                    <div className="form-control bg-transparent border-0"></div>
                   </div>
-                </div>
-              </>
+                )}
+              </div>
             )}
 
             {configTab === 'simulation' && (
-              <>
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 pt-1">
                 <div className="form-group">
                   <label className="form-label">Number of Particles</label>
                   <input
@@ -1761,56 +1690,74 @@ export default function Dashboard() {
                     className="form-control"
                   />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="form-group">
-                    <label className="form-label">Total Batches</label>
-                    <input
-                      type="number"
-                      value={params.batches}
-                      onChange={(e) => handleParamChange('batches', parseInt(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Inactive Batches</label>
-                    <input
-                      type="number"
-                      value={params.inactive_batches}
-                      onChange={(e) => handleParamChange('inactive_batches', parseInt(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">Total Batches</label>
+                  <input
+                    type="number"
+                    value={params.batches}
+                    onChange={(e) => handleParamChange('batches', parseInt(e.target.value))}
+                    className="form-control"
+                  />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="form-group">
-                    <label className="form-label">Coolant Temp (K)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={params.temperature}
-                      onChange={(e) => handleParamChange('temperature', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Fuel Temp (K)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={params.fuel_temperature}
-                      onChange={(e) => handleParamChange('fuel_temperature', parseFloat(e.target.value))}
-                      className="form-control"
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">Inactive Batches</label>
+                  <input
+                    type="number"
+                    value={params.inactive_batches}
+                    onChange={(e) => handleParamChange('inactive_batches', parseInt(e.target.value))}
+                    className="form-control"
+                  />
                 </div>
-              </>
+                <div className="form-group">
+                  <label className="form-label">Coolant Temp (K)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={params.temperature}
+                    onChange={(e) => handleParamChange('temperature', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Fuel Temp (K)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={params.fuel_temperature}
+                    onChange={(e) => handleParamChange('fuel_temperature', parseFloat(e.target.value))}
+                    className="form-control"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Control Rod State</label>
+                  <select
+                    value={params.control_rod_state}
+                    onChange={(e) => handleParamChange('control_rod_state', e.target.value)}
+                    className="form-select text-slate-200"
+                  >
+                    <option value="Fully Withdrawn">Fully Withdrawn (Water filled)</option>
+                    <option value="Fully Inserted">Fully Inserted</option>
+                    <option value="Partially Inserted">Partially Inserted (50% depth)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Absorber Material</label>
+                  <select
+                    value={params.control_rod_material}
+                    onChange={(e) => handleParamChange('control_rod_material', e.target.value)}
+                    className="form-select text-slate-200"
+                  >
+                    <option value="Ag-In-Cd">Silver-Indium-Cadmium (Ag-In-Cd)</option>
+                    <option value="B4C">Boron Carbide (B₄C)</option>
+                    <option value="Hafnium">Hafnium Metal</option>
+                  </select>
+                </div>
+              </div>
             )}
 
             {configTab === 'advanced' && (
-              <div className="flex flex-col gap-4">
-                <div className="form-group">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pt-1">
+                <div className="form-group w-full lg:w-72">
                   <label className="form-label">Boundary Condition</label>
                   <select
                     value={params.boundary_type}
@@ -1822,9 +1769,7 @@ export default function Dashboard() {
                   </select>
                 </div>
                 
-                <div className="border-t border-slate-800/60 pt-4 flex flex-col gap-3">
-                  <span className="text-[11px] font-bold text-sky-400 uppercase tracking-wider block mb-1">Analysis Modules</span>
-                  
+                <div className="flex-1 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                   <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
@@ -1834,7 +1779,7 @@ export default function Dashboard() {
                       className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
                     />
                     <label htmlFor="kinetics_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
-                      Kinetics Parameters (&beta;<sub>eff</sub>, Rod Worth)
+                      Kinetics Parameters
                     </label>
                   </div>
                   
@@ -1847,7 +1792,7 @@ export default function Dashboard() {
                       className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
                     />
                     <label htmlFor="safety_coefs_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
-                      Safety Coefficients (FTC, MTC, Void)
+                      Safety Coefs
                     </label>
                   </div>
                   
@@ -1860,7 +1805,7 @@ export default function Dashboard() {
                       className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
                     />
                     <label htmlFor="flux_3d_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
-                      3D Spatial Mesh Mapping
+                      3D Spatial Mesh
                     </label>
                   </div>
                   
@@ -1873,7 +1818,7 @@ export default function Dashboard() {
                       className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
                     />
                     <label htmlFor="depletion_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
-                      Fuel Depletion / Burnup Analysis
+                      Fuel Depletion
                     </label>
                   </div>
                   
@@ -1886,7 +1831,7 @@ export default function Dashboard() {
                       className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
                     />
                     <label htmlFor="economy_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
-                      Reaction Rates & Spectral Indices
+                      Reaction Rates
                     </label>
                   </div>
                   
@@ -1899,7 +1844,7 @@ export default function Dashboard() {
                       className="w-4 h-4 rounded text-sky-400 bg-slate-900 border-slate-800"
                     />
                     <label htmlFor="shielding_enabled" className="text-xs font-semibold text-slate-300 select-none cursor-pointer">
-                      Biological Dose & Clad DPA
+                      Dose & DPA Rate
                     </label>
                   </div>
                 </div>
@@ -1907,109 +1852,197 @@ export default function Dashboard() {
             )}
           </div>
 
+          {/* ── SOLVER ENGINE SECTION ── */}
+          <div style={{ marginTop: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#7A828F', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Solver Engines</span>
+              <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, #3A3E45, transparent)' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              {/* OpenMC Engine Card */}
+              {[{ id: 'openmc', label: 'OpenMC Solver', sub: 'Monte Carlo Transport', color: '#38bdf8', key: 'run_openmc' },
+                { id: 'geant4', label: 'Geant4 Solver', sub: 'Particle Simulation', color: '#2DD4BF', key: 'run_geant4' }
+              ].map(engine => {
+                const isSelected = params[engine.key];
+                return (
+                  <button
+                    key={engine.id}
+                    onClick={() => {
+                      const newVal = !params[engine.key];
+                      if (!newVal && !((engine.key === 'run_openmc' && params.run_geant4) || (engine.key === 'run_geant4' && params.run_openmc))) return;
+                      handleParamChange(engine.key, newVal);
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      padding: '10px 18px',
+                      borderRadius: '14px',
+                      border: isSelected ? `1px solid ${engine.color}55` : '1px solid #3A3E45',
+                      background: isSelected ? `linear-gradient(135deg, ${engine.color}12 0%, ${engine.color}05 100%)` : '#161820',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      boxShadow: isSelected ? `0 0 20px ${engine.color}20, inset 0 1px 0 rgba(255,255,255,0.04)` : 'none',
+                      transform: isSelected ? 'translateY(-1px)' : 'none',
+                      minWidth: '180px',
+                    }}
+                  >
+                    <div style={{
+                      width: '28px', height: '28px', borderRadius: '8px',
+                      background: isSelected ? `${engine.color}20` : '#1e2029',
+                      border: `1px solid ${isSelected ? engine.color + '40' : '#3A3E45'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        {isSelected ? (
+                          <path d="M5 13l4 4L19 7" stroke={engine.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        ) : (
+                          <rect x="5" y="5" width="14" height="14" rx="2" stroke="#3A3E45" strokeWidth="1.5"/>
+                        )}
+                      </svg>
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: isSelected ? engine.color : '#7A828F', lineHeight: 1.2 }}>{engine.label}</div>
+                      <div style={{ fontSize: '10px', color: '#56616e', marginTop: '2px' }}>{engine.sub}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-
-          {/* Trigger button */}
-          <button
-            onClick={triggerSimulation}
-            disabled={jobStatus === 'pending' || jobStatus === 'generating' || jobStatus === 'running' || jobStatus === 'parsing' || mainTab === 'dataset'}
-            className="btn btn-primary w-full py-3 text-sm font-semibold flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {jobStatus === 'running' ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" /> Running Simulation...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" /> Generate & Run Simulation
-              </>
-            )}
-          </button>
+          {/* ── RUN BUTTON ── */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #2a2d35', paddingTop: '14px', marginTop: '4px' }}>
+            <button
+              onClick={triggerSimulation}
+              disabled={jobStatus === 'pending' || jobStatus === 'generating' || jobStatus === 'running' || jobStatus === 'parsing'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '11px 28px',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: 700,
+                border: '1px solid rgba(45,212,191,0.4)',
+                background: 'linear-gradient(135deg, #0f3f36 0%, #0a2920 100%)',
+                color: '#2DD4BF',
+                cursor: (jobStatus === 'pending' || jobStatus === 'generating' || jobStatus === 'running' || jobStatus === 'parsing') ? 'not-allowed' : 'pointer',
+                opacity: (jobStatus === 'pending' || jobStatus === 'generating' || jobStatus === 'running' || jobStatus === 'parsing') ? 0.6 : 1,
+                boxShadow: '0 4px 20px rgba(45,212,191,0.15), inset 0 1px 0 rgba(255,255,255,0.06)',
+                transition: 'all 0.2s ease',
+                letterSpacing: '0.02em',
+              }}
+            >
+              {jobStatus === 'running' || jobStatus === 'generating' || jobStatus === 'parsing' ? (
+                <><span style={{ width: '14px', height: '14px', border: '2px solid transparent', borderTopColor: '#2DD4BF', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} /> {jobStatus === 'generating' ? 'Generating...' : jobStatus === 'parsing' ? 'Parsing...' : 'Simulating...'}</>
+              ) : (
+                <><Play className="w-3.5 h-3.5" /> Generate &amp; Run Simulation</>
+              )}
+            </button>
+          </div>
         </section>
+        </div>  {/* End floating configurator wrapper */}
 
-        {/* Right Details Panel */}
+        {/* ============================================================ */}
+        {/* SIMULATION LOG — floating card below configurator */}
+        {/* ============================================================ */}
+        <div className="flex justify-center w-full">
+        <div style={{
+          background: 'linear-gradient(145deg, #1a1d24 0%, #16191f 100%)',
+          border: '1px solid #3A3E45',
+          borderRadius: '20px',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+          width: '100%',
+          maxWidth: '1400px',
+          overflow: 'hidden',
+        }}>
+          {/* Log Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #2a2d35' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Terminal className="w-4 h-4" style={{ color: '#2DD4BF' }} />
+              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#F5F5F5' }}>Simulation Log</span>
+              <span style={{
+                fontSize: '9px', fontWeight: 700, padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.06em',
+                ...(jobStatus === 'completed' ? { background: 'rgba(52,211,153,0.1)', color: '#34d399', border: '1px solid rgba(52,211,153,0.2)' } :
+                  jobStatus === 'failed' ? { background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' } :
+                  (jobStatus === 'running' || jobStatus === 'generating' || jobStatus === 'parsing') ? { background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' } :
+                  { background: '#1e293b', color: '#94a3b8', border: '1px solid #334155' })
+              }}>{ jobStatus }</span>
+            </div>
+            <button
+              onClick={() => setSimplifyLogs(!simplifyLogs)}
+              style={{
+                padding: '5px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 700,
+                border: simplifyLogs ? '1px solid rgba(45,212,191,0.35)' : '1px solid #3A3E45',
+                background: simplifyLogs ? 'rgba(45,212,191,0.08)' : '#1e293b',
+                color: simplifyLogs ? '#2DD4BF' : '#94a3b8', cursor: 'pointer',
+              }}
+            >
+              {simplifyLogs ? 'Simplified' : 'Raw Logs'}
+            </button>
+          </div>
+          {/* Log Console */}
+          <div
+            ref={logConsoleRef}
+            className="log-console"
+            style={{ height: '160px', borderRadius: 0, border: 'none' }}
+          >
+            {(simplifyLogs ? getSimplifiedLogs(simulationLogs, params) : simulationLogs) || "Console ready. Click 'Generate & Run Simulation' to start."}
+          </div>
+        </div>
+        </div>
+
+        {/* ============================================================ */}
+        {/* RESULTS SECTION — 2-column synchronized layout */}
+        {/* ============================================================ */}
         <section className="flex flex-col gap-6">
           {mainTab === 'simulation' ? (
             <>
               {/* Simulation visualizer and logs panel */}
-              <div className="simulation-grid">
-                
-                {/* 2D Assembly visualization */}
-                <div className="panel flex flex-col items-center">
-                  <div className="panel-header w-full">
-                    <h3 className="panel-title"><Layers className="w-4 h-4 text-sky-400" /> Geometry Visualizer</h3>
-                    <div className="overlay-btn-group">
-                      <button
-                        onClick={() => setActiveOverlay('none')}
-                        className={`overlay-btn ${activeOverlay === 'none' ? 'active' : ''}`}
-                      >
-                        Material
-                      </button>
-                      <button
-                        onClick={() => setActiveOverlay('power')}
-                        disabled={!simulationResults}
-                        className={`overlay-btn ${activeOverlay === 'power' ? 'active' : ''}`}
-                      >
-                        Power
-                      </button>
-                      <button
-                        onClick={() => setActiveOverlay('flux')}
-                        disabled={!simulationResults}
-                        className={`overlay-btn ${activeOverlay === 'flux' ? 'active' : ''}`}
-                      >
-                        Flux
-                      </button>
+              {/* 2-Column Synchronized Visualizer Row */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+                {/* LEFT: Geant4 Geometry Visualizer */}
+                {params.run_geant4 && (
+                  <div className="panel flex flex-col items-center border border-[#3A3E45] rounded-[20px]" style={{ borderTop: '2px solid rgba(45,212,191,0.35)' }}>
+                    <div className="panel-header w-full">
+                      <h3 className="panel-title"><Layers className="w-4 h-4 text-teal-400" /> GEANT4 Geometry Visualizer</h3>
+                      <div className="overlay-btn-group">
+                        <button onClick={() => setActiveOverlayG4('none')} className={`overlay-btn ${activeOverlayG4 === 'none' ? 'active' : ''}`}>Material</button>
+                        <button onClick={() => setActiveOverlayG4('power')} disabled={!simulationResults} className={`overlay-btn ${activeOverlayG4 === 'power' ? 'active' : ''}`}>Power</button>
+                        <button onClick={() => setActiveOverlayG4('flux')} disabled={!simulationResults} className={`overlay-btn ${activeOverlayG4 === 'flux' ? 'active' : ''}`}>Flux</button>
+                      </div>
                     </div>
+                    <AssemblyVisualizer
+                      latticeType={params.lattice_type} pinPitch={params.pin_pitch} fuelRadius={params.fuel_radius}
+                      gapRadius={params.gap_radius} cladRadius={params.clad_radius} controlRodState={params.control_rod_state}
+                      poisonEnabled={params.poison_enabled} results={simulationResults?.geant4 ?? null} activeMap={activeOverlayG4}
+                    />
                   </div>
-                  <AssemblyVisualizer
-                    latticeType={params.lattice_type}
-                    pinPitch={params.pin_pitch}
-                    fuelRadius={params.fuel_radius}
-                    gapRadius={params.gap_radius}
-                    cladRadius={params.clad_radius}
-                    controlRodState={params.control_rod_state}
-                    poisonEnabled={params.poison_enabled}
-                    results={simulationResults}
-                    activeMap={activeOverlay}
-                  />
-                </div>
-
-                {/* Live simulation logger console */}
-                <div className="panel flex flex-col h-[520px]">
-                  <div className="panel-header">
-                    <h3 className="panel-title"><Terminal className="w-4 h-4 text-sky-400" /> Simulation Live Logs</h3>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setSimplifyLogs(!simplifyLogs)}
-                        className={`toggle-btn ${simplifyLogs ? 'active' : ''}`}
-                      >
-                        {simplifyLogs ? 'Simplified' : 'Raw Logs'}
-                      </button>
-                      <span className={`status-badge ${
-                        jobStatus === 'completed' ? 'completed' : 
-                        jobStatus === 'failed' ? 'failed' :
-                        jobStatus === 'running' || jobStatus === 'generating' || jobStatus === 'parsing' ? 'running' : 'idle'
-                      }`}>
-                        {jobStatus}
-                      </span>
+                )}
+                {/* RIGHT: OpenMC Geometry Visualizer */}
+                {params.run_openmc && (
+                  <div className="panel flex flex-col items-center border border-[#3A3E45] rounded-[20px]" style={{ borderTop: '2px solid rgba(56,189,248,0.35)' }}>
+                    <div className="panel-header w-full">
+                      <h3 className="panel-title"><Layers className="w-4 h-4 text-sky-400" /> OPENMC Geometry Visualizer</h3>
+                      <div className="overlay-btn-group">
+                        <button onClick={() => setActiveOverlayOpenMC('none')} className={`overlay-btn ${activeOverlayOpenMC === 'none' ? 'active' : ''}`}>Material</button>
+                        <button onClick={() => setActiveOverlayOpenMC('power')} disabled={!simulationResults} className={`overlay-btn ${activeOverlayOpenMC === 'power' ? 'active' : ''}`}>Power</button>
+                        <button onClick={() => setActiveOverlayOpenMC('flux')} disabled={!simulationResults} className={`overlay-btn ${activeOverlayOpenMC === 'flux' ? 'active' : ''}`}>Flux</button>
+                      </div>
                     </div>
+                    <AssemblyVisualizer
+                      latticeType={params.lattice_type} pinPitch={params.pin_pitch} fuelRadius={params.fuel_radius}
+                      gapRadius={params.gap_radius} cladRadius={params.clad_radius} controlRodState={params.control_rod_state}
+                      poisonEnabled={params.poison_enabled} results={simulationResults?.openmc ?? null} activeMap={activeOverlayOpenMC}
+                    />
                   </div>
-                  
-                  <div 
-                    ref={logConsoleRef}
-                    className="log-console"
-                  >
-                    {(simplifyLogs ? getSimplifiedLogs(simulationLogs, params) : simulationLogs) || "Console ready. Click 'Generate & Run Simulation' to start OpenMC."}
-                  </div>
-                </div>
-              </div>
+                )}
+              </div> {/* End 2-Column Visualizer Grid */}
 
               {/* Simulation Results analysis dashboard */}
               {simulationResults && (
                 <div className="flex flex-col gap-6">
                   
-                  {/* Results detailed tab selector */}
-                  <div className="bg-slate-900/40 border border-slate-800/80 rounded-lg p-1 flex flex-wrap gap-1 shadow-inner">
+                  {/* Results Tab Selector — Premium Pills */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#0d0f14', borderRadius: '14px', padding: '5px', border: '1px solid #2a2d35', flexWrap: 'wrap' }}>
                     {(() => {
                       const tabs = [
                         { id: 'core', label: 'Core Performance', icon: BarChart2 },
@@ -2027,13 +2060,22 @@ export default function Dashboard() {
                       return tabs;
                     })().map(tab => {
                       const Icon = tab.icon;
+                      const isActive = resultsTab === tab.id;
                       return (
                         <button
                           key={tab.id}
                           onClick={() => setResultsTab(tab.id)}
-                          className={`tab-btn ${resultsTab === tab.id ? 'active' : ''}`}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '5px',
+                            padding: '6px 13px', borderRadius: '9px', fontSize: '10.5px', fontWeight: 700,
+                            border: isActive ? '1px solid rgba(45,212,191,0.45)' : '1px solid transparent',
+                            background: isActive ? 'linear-gradient(135deg, rgba(45,212,191,0.15) 0%, rgba(45,212,191,0.05) 100%)' : 'transparent',
+                            color: isActive ? '#2DD4BF' : '#7A828F',
+                            cursor: 'pointer', transition: 'all 0.15s ease',
+                            boxShadow: isActive ? '0 0 12px rgba(45,212,191,0.2)' : 'none',
+                          }}
                         >
-                          <Icon className="w-3.5 h-3.5" />
+                          <Icon style={{ width: '12px', height: '12px' }} />
                           {tab.label}
                         </button>
                       );
@@ -2045,10 +2087,21 @@ export default function Dashboard() {
                     <>
                       {simulationResults?.openmc && simulationResults?.geant4 ? (
                         <div className="flex flex-col gap-8">
+                          {/* ── 2-Column Engine Header Labels */}
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', background: 'rgba(45,212,191,0.06)', border: '1px solid rgba(45,212,191,0.2)', borderRadius: '12px' }}>
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#2DD4BF', boxShadow: '0 0 8px #2DD4BF' }} />
+                              <span style={{ fontSize: '11px', fontWeight: 700, color: '#2DD4BF', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Geant4 Solver — Results</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '12px' }}>
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#38bdf8', boxShadow: '0 0 8px #38bdf8' }} />
+                              <span style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>OpenMC Solver — Results</span>
+                            </div>
+                          </div>
                           {/* Side-by-Side Metrics Grid */}
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-4">
-                            {renderEngineMetrics(simulationResults.geant4, "GEANT4 SOLVER", "text-teal-400")}
-                            {renderEngineMetrics(simulationResults.openmc, "OPENMC SOLVER", "text-sky-400")}
+                            {renderEngineMetrics(simulationResults.geant4, "GEANT4 SOLVER (LEFT)", "text-teal-400")}
+                            {renderEngineMetrics(simulationResults.openmc, "OPENMC SOLVER (RIGHT)", "text-sky-400")}
                           </div>
 
                           {/* 1. 2D Heatmap Grid */}
@@ -2289,7 +2342,7 @@ export default function Dashboard() {
                   {/* Kinetics Tab */}
                   {resultsTab === 'kinetics' && (
                     <div className="flex flex-col gap-6">
-                      {simulationResults.beta_eff !== undefined && simulationResults.beta_eff !== null && simulationResults.beta_eff > 0 ? (
+                      {simulationResults.beta_eff !== undefined && simulationResults.beta_eff > 0 ? (
                         <>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             {/* Beta effective card */}
@@ -2307,13 +2360,12 @@ export default function Dashboard() {
                             <div className="panel bg-[#0e1626]/60 border-l-4 border-l-purple-400 p-5 flex flex-col justify-between">
                               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Mean Generation Time (&Lambda;<sub>eff</sub>)</span>
                               <h4 className="text-3xl font-extrabold text-purple-400 mt-3">
-                                {simulationResults.gen_time != null ? `${(simulationResults.gen_time * 1e6).toFixed(3)} μs` : 'N/A'}
+                                {(simulationResults.gen_time * 1e6).toFixed(3)} &mu;s
                               </h4>
                               <p className="text-[11px] text-slate-400 mt-2">
                                 Mean time from neutron emission to causing a subsequent fission. Smaller times lead to faster transients.
                               </p>
                             </div>
-
 
                             {/* Control Rod Worth Card */}
                             <div className="panel bg-[#0e1626]/60 border-l-4 border-l-amber-400 p-5 flex flex-col justify-between">
@@ -2379,18 +2431,6 @@ export default function Dashboard() {
                             </div>
                           )}
                         </>
-                      ) : simulationResults.beta_eff === null ? (
-                        <div className="panel bg-[#0a1628]/80 border-blue-500/20 p-8 flex flex-col items-center justify-center text-center gap-4">
-                          <svg className="w-12 h-12 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                          <div>
-                            <h4 className="text-lg font-bold text-blue-400">β<sub>eff</sub> Not Available in Geant4</h4>
-                            <p className="text-xs text-slate-400 mt-2 max-w-lg">
-                              Effective delayed neutron fraction (β<sub>eff</sub>) requires Iterated Fission Probability (IFP) tracking — a feature available only in OpenMC's eigenvalue solver. 
-                              In Geant4, delayed neutrons are killed at birth (fStopAndKill) to avoid double-counting in the k-eigenvalue power iteration. 
-                              Use the <b>OpenMC</b> solver with <b>Kinetics Parameters</b> enabled to obtain β<sub>eff</sub> and Λ<sub>eff</sub>.
-                            </p>
-                          </div>
-                        </div>
                       ) : (
                         <div className="panel bg-[#1a1420] border-amber-500/10 p-8 flex flex-col items-center justify-center text-center gap-4">
                           <AlertTriangle className="w-12 h-12 text-amber-500" />
@@ -2605,7 +2645,7 @@ export default function Dashboard() {
                   {/* Depletion & Burnup Tab */}
                   {resultsTab === 'depletion' && (
                     <div className="flex flex-col gap-6">
-                      {simulationResults.depletion !== undefined && simulationResults.depletion !== null ? (
+                      {simulationResults.depletion !== undefined ? (
                         <>
                           {/* Charts */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -2885,16 +2925,6 @@ export default function Dashboard() {
                                   format: (v) => (v * 1e5).toFixed(1)
                                 },
                                 {
-                                  name: "Source Shannon Entropy (bits)",
-                                  key: "shannon_entropy",
-                                  format: (v) => {
-                                    if (Array.isArray(v)) {
-                                      return v.length > 0 ? v[v.length - 1].toFixed(4) : "N/A";
-                                    }
-                                    return typeof v === 'number' ? v.toFixed(4) : "N/A";
-                                  }
-                                },
-                                {
                                   name: "Global Fission Rate (fissions/s)",
                                   key: "global_fission_rate",
                                   format: (v) => v.toExponential(4)
@@ -2915,18 +2945,8 @@ export default function Dashboard() {
                                   format: (v) => v.toFixed(3)
                                 }
                               ].map((row, i) => {
-                                const rawOM = simulationResults.openmc[row.key];
-                                const rawG4 = simulationResults.geant4[row.key];
-                                
-                                const getNumericValue = (v) => {
-                                  if (Array.isArray(v)) {
-                                    return v.length > 0 ? v[v.length - 1] : 0;
-                                  }
-                                  return typeof v === 'number' ? v : 0;
-                                };
-                                
-                                const valOM = rawOM !== undefined ? getNumericValue(rawOM) : 0;
-                                const valG4 = rawG4 !== undefined ? getNumericValue(rawG4) : 0;
+                                const valOM = simulationResults.openmc[row.key] || 0;
+                                const valG4 = simulationResults.geant4[row.key] || 0;
                                 const absDiff = valOM - valG4;
                                 const relDiff = valOM !== 0 ? (absDiff / valOM) * 100 : 0;
                                 
@@ -2979,8 +2999,8 @@ export default function Dashboard() {
                             ]}
                             layout={{
                               title: 'Neutron Energy Spectrum Comparison',
-                              xaxis: { title: 'Energy (MeV)', type: 'log', gridcolor: '#1e293b' },
-                              yaxis: { title: 'Flux (per lethargy, per source n)', type: 'log', gridcolor: '#1e293b' },
+                              xaxis: { title: 'Energy (MeV)', type: 'log', gridcolor: '#3A3E45' },
+                              yaxis: { title: 'Flux (per lethargy, per source n)', type: 'log', gridcolor: '#3A3E45' },
                               margin: { l: 60, r: 20, t: 40, b: 40 },
                               height: 320,
                               paper_bgcolor: 'rgba(0,0,0,0)',
@@ -3012,130 +3032,13 @@ export default function Dashboard() {
                             ]}
                             layout={{
                               title: 'Axial Power Distribution Comparison',
-                              xaxis: { title: 'Relative Power', gridcolor: '#1e293b' },
-                              yaxis: { title: 'Active Height (cm)', gridcolor: '#1e293b' },
+                              xaxis: { title: 'Relative Power', gridcolor: '#3A3E45' },
+                              yaxis: { title: 'Active Height (cm)', gridcolor: '#3A3E45' },
                               margin: { l: 50, r: 20, t: 40, b: 40 },
                               height: 320,
                               paper_bgcolor: 'rgba(0,0,0,0)',
                               plot_bgcolor: 'rgba(0,0,0,0)',
                               font: { color: '#94a3b8' }
-                            }}
-                          />
-                        </div>
-                      </div>
-                      
-                      {/* Convergence Comparison Overlay (k-eff & Shannon Entropy) */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="panel p-4">
-                          <PlotlyChart
-                            data={[
-                              {
-                                x: Array.from({ length: (simulationResults.openmc.batch_keff || []).length }, (_, i) => i + 1),
-                                y: simulationResults.openmc.batch_keff || [],
-                                type: 'scatter',
-                                mode: 'lines+markers',
-                                name: 'OpenMC k-eff',
-                                line: { color: '#3b82f6', width: 2 },
-                                marker: { size: 4 }
-                              },
-                              {
-                                x: Array.from({ length: (simulationResults.geant4.batch_keff || []).length }, (_, i) => i + 1),
-                                y: simulationResults.geant4.batch_keff || [],
-                                type: 'scatter',
-                                mode: 'lines+markers',
-                                name: 'Geant4 k-eff',
-                                line: { color: '#f97316', width: 2 },
-                                marker: { size: 4 }
-                              }
-                            ]}
-                            layout={{
-                              title: 'k-Effective Convergence Comparison (All Cycles)',
-                              xaxis: { title: 'Cycle', gridcolor: '#1e293b' },
-                              yaxis: { title: 'k-effective', gridcolor: '#1e293b' },
-                              margin: { l: 50, r: 20, t: 40, b: 40 },
-                              height: 320,
-                              paper_bgcolor: 'rgba(0,0,0,0)',
-                              plot_bgcolor: 'rgba(0,0,0,0)',
-                              font: { color: '#94a3b8' },
-                              shapes: (simulationResults.openmc.inactive_batches || 0) > 0 ? [{
-                                type: 'line',
-                                xref: 'x',
-                                yref: 'paper',
-                                x0: (simulationResults.openmc.inactive_batches || 0) + 0.5,
-                                y0: 0,
-                                x1: (simulationResults.openmc.inactive_batches || 0) + 0.5,
-                                y1: 1,
-                                line: { color: '#ef4444', width: 1.5, dash: 'dash' }
-                              }] : [],
-                              annotations: (simulationResults.openmc.inactive_batches || 0) > 0 ? [{
-                                x: (simulationResults.openmc.inactive_batches || 0) + 0.5,
-                                y: 0.9,
-                                xref: 'x',
-                                yref: 'paper',
-                                text: 'Active Cycles Begin',
-                                showarrow: false,
-                                textangle: -90,
-                                xanchor: 'right',
-                                yanchor: 'top',
-                                font: { color: '#ef4444', size: 9 }
-                              }] : []
-                            }}
-                          />
-                        </div>
-
-                        <div className="panel p-4">
-                          <PlotlyChart
-                            data={[
-                              {
-                                x: Array.from({ length: (simulationResults.openmc.shannon_entropy || []).length }, (_, i) => i + 1),
-                                y: simulationResults.openmc.shannon_entropy || [],
-                                type: 'scatter',
-                                mode: 'lines+markers',
-                                name: 'OpenMC Entropy',
-                                line: { color: '#c084fc', width: 2 },
-                                marker: { size: 4 }
-                              },
-                              {
-                                x: Array.from({ length: (simulationResults.geant4.shannon_entropy || []).length }, (_, i) => i + 1),
-                                y: simulationResults.geant4.shannon_entropy || [],
-                                type: 'scatter',
-                                mode: 'lines+markers',
-                                name: 'Geant4 Entropy',
-                                line: { color: '#2dd4bf', width: 2 },
-                                marker: { size: 4 }
-                              }
-                            ]}
-                            layout={{
-                              title: 'Source Shannon Entropy Comparison (All Cycles)',
-                              xaxis: { title: 'Cycle', gridcolor: '#1e293b' },
-                              yaxis: { title: 'Shannon Entropy H (bits)', gridcolor: '#1e293b' },
-                              margin: { l: 50, r: 20, t: 40, b: 40 },
-                              height: 320,
-                              paper_bgcolor: 'rgba(0,0,0,0)',
-                              plot_bgcolor: 'rgba(0,0,0,0)',
-                              font: { color: '#94a3b8' },
-                              shapes: (simulationResults.openmc.inactive_batches || 0) > 0 ? [{
-                                type: 'line',
-                                xref: 'x',
-                                yref: 'paper',
-                                x0: (simulationResults.openmc.inactive_batches || 0) + 0.5,
-                                y0: 0,
-                                x1: (simulationResults.openmc.inactive_batches || 0) + 0.5,
-                                y1: 1,
-                                line: { color: '#ef4444', width: 1.5, dash: 'dash' }
-                              }] : [],
-                              annotations: (simulationResults.openmc.inactive_batches || 0) > 0 ? [{
-                                x: (simulationResults.openmc.inactive_batches || 0) + 0.5,
-                                y: 0.9,
-                                xref: 'x',
-                                yref: 'paper',
-                                text: 'Active Cycles Begin',
-                                showarrow: false,
-                                textangle: -90,
-                                xanchor: 'right',
-                                yanchor: 'top',
-                                font: { color: '#ef4444', size: 9 }
-                              }] : []
                             }}
                           />
                         </div>
@@ -3161,8 +3064,8 @@ export default function Dashboard() {
                                 colorbar: { thickness: 10, len: 0.8 }
                               }]}
                               layout={{
-                                xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
-                                yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+                                xaxis: { title: 'X-Index', gridcolor: '#3A3E45' },
+                                yaxis: { title: 'Y-Index', gridcolor: '#3A3E45' },
                                 margin: { l: 40, r: 10, t: 10, b: 40 },
                                 height: 280,
                                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -3183,8 +3086,8 @@ export default function Dashboard() {
                                 colorbar: { thickness: 10, len: 0.8 }
                               }]}
                               layout={{
-                                xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
-                                yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+                                xaxis: { title: 'X-Index', gridcolor: '#3A3E45' },
+                                yaxis: { title: 'Y-Index', gridcolor: '#3A3E45' },
                                 margin: { l: 40, r: 10, t: 10, b: 40 },
                                 height: 280,
                                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -3217,8 +3120,8 @@ export default function Dashboard() {
                                 colorbar: { thickness: 10, len: 0.8 }
                               }]}
                               layout={{
-                                xaxis: { title: 'X-Index', gridcolor: '#1e293b' },
-                                yaxis: { title: 'Y-Index', gridcolor: '#1e293b' },
+                                xaxis: { title: 'X-Index', gridcolor: '#3A3E45' },
+                                yaxis: { title: 'Y-Index', gridcolor: '#3A3E45' },
                                 margin: { l: 40, r: 10, t: 10, b: 40 },
                                 height: 280,
                                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -3410,19 +3313,22 @@ export default function Dashboard() {
                     </div>
 
                     {/* Simulation Engine selection */}
-                    <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 flex items-center justify-between gap-4 mt-4">
-                      <label className="text-xs font-bold text-sky-400 flex items-center gap-1.5 shrink-0">
+                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-col gap-2 mt-4">
+                      <label className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
                         <Cpu className="w-3.5 h-3.5" />
-                        Choose Engine:
+                        Simulation Engine
                       </label>
                       <select
                         value={datasetParams.engine}
                         onChange={(e) => setDatasetParams(p => ({ ...p, engine: e.target.value }))}
-                        className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs font-bold text-sky-400 focus:outline-none focus:border-sky-500 cursor-pointer w-full max-w-[140px] text-center"
+                        className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-500 cursor-pointer"
                       >
-                        <option value="openmc">OpenMC</option>
-                        <option value="geant4">Geant4</option>
+                        <option value="openmc">OpenMC Monte Carlo Solver</option>
+                        <option value="geant4">Geant4 Criticality Solver</option>
                       </select>
+                      <span className="text-[10px] text-slate-500 italic mt-0.5">
+                        Choose the underlying physics engine to generate the dataset points.
+                      </span>
                     </div>
                   </div>
                 </div>

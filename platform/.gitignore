@@ -15,3 +15,11 @@ node_modules/
 
 # OS
 .DS_Store
+
+# C++ Build outputs (Geant4 compilations)
+build/
+bin/
+*.o
+*.a
+beavrs_assembly
+beavrs_assembly.exe

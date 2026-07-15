@@ -1,0 +1,15 @@
+/smr/reactor/preset CAREM25
+/smr/reactor/pinPitch 1.38 cm
+/smr/reactor/fuelRadius 0.380 cm
+/smr/reactor/gapRadius 0.3875 cm
+/smr/reactor/cladRadius 0.450 cm
+/smr/reactor/gtInnerRadius 0.350 cm
+/smr/reactor/gtOuterRadius 0.425 cm
+/smr/reactor/activeHeight 140.0 cm
+/smr/reactor/enrichment 0.031
+/smr/reactor/boronPPM 0.0
+/smr/reactor/fuelTemperature 573.15 kelvin
+/smr/reactor/moderatorTemperature 573.15 kelvin
+/smr/reactor/moderatorDensity 0.740582 g/cm3
+/run/initialize
+/run/beamOn 100

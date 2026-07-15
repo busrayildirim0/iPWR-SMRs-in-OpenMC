@@ -1,0 +1,21 @@
+# macros/mpower.mac
+# SMART / mPower thesis model - square 17x17, Zircaloy-4 clad, pitch 1.20 cm,
+# 4.8% enrichment, 0 ppm boron, fuel 200 cm, coolant 600 K, fuel temp 1200 K,
+# no burnable poison, rods withdrawn. Preset before /run/initialize.
+
+/random/setSeeds 12345 67890
+
+/smr/reactor/preset mPower
+/run/initialize
+
+/beavrs/output/fileName mpower_eigen
+/beavrs/geom/reflectRadial true
+/beavrs/geom/reflectAxial  true
+/beavrs/gun/neutronsPerEvent 8
+/run/printProgress 1000000
+
+# 1250 x 8 = 10000 source neutrons/generation; 50 inactive + 150 active = 200
+/beavrs/eigen/inactive  50
+/beavrs/eigen/active    150
+/beavrs/eigen/histories 1250
+/beavrs/eigen/run

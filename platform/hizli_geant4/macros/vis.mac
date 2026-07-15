@@ -1,0 +1,83 @@
+# ===== File: vis.mac =====
+# BEAVRS Assembly Visualization Macro
+# Use with OpenGL viewer
+#----------------------------------------------------------------------------
+
+# Verbosity
+#/control/verbose 2
+#/run/verbose 2
+
+#----------------------------------------------------------------------------
+# REAKTOR SECIMI  (varsayilan: BEAVRS)
+# Farkli bir reaktor gormek icin asagidaki satirin basindaki '#' isaretini
+# kaldirin ve reaktor adini yazin. Secenekler:
+#   BEAVRS | NuScale | mPower | SMR160 | CAREM25
+# NOT: preset komutu /run/initialize'dan ONCE gelmelidir (PreInit durumu).
+#----------------------------------------------------------------------------
+#/smr/reactor/preset CAREM25
+
+# Initialize the run
+/run/initialize
+
+#----------------------------------------------------------------------------
+# Visualization settings
+#----------------------------------------------------------------------------
+# Create OpenGL viewer
+/vis/open OGL 800x800-0+0
+
+# Draw geometry
+/vis/drawVolume
+
+# Set viewing angle for assembly visualization (top-down view)
+/vis/viewer/set/viewpointVector 0 0 1
+/vis/viewer/set/upVector 0 1 0
+/vis/viewer/zoom 5
+
+# Specify style (surface, wireframe)
+/vis/viewer/set/style surface
+/vis/viewer/set/auxiliaryEdge true
+/vis/viewer/set/lineSegmentsPerCircle 100
+
+# Draw coordinate axes (disabled)
+# /vis/scene/add/axes 0 0 0 10 cm
+
+# Smooth edges
+/vis/viewer/set/hiddenMarker true
+
+# Set background color (dark blue)
+/vis/viewer/set/background 0 0 0 1.0   # Siyah arka plan
+
+# Make world box visible (wireframe)
+/vis/geometry/set/visibility WorldLV 0 true
+/vis/geometry/set/forceWireframe WorldLV 0 true
+
+# Make Assembly boundary visible (cyan wireframe)
+/vis/geometry/set/visibility AssemblyLV 0 true
+/vis/geometry/set/forceWireframe AssemblyLV 0 true
+/vis/geometry/set/colour AssemblyLV 0 0 1 1 1
+
+# Cell boundaries are set in DetectorConstruction.cc (green wireframe)
+
+# Add trajectories
+/vis/scene/add/trajectories smooth
+/vis/modeling/trajectories/create/drawByCharge
+/vis/modeling/trajectories/drawByCharge-0/default/setDrawStepPts true
+/vis/modeling/trajectories/drawByCharge-0/default/setStepPtsSize 2
+
+# Draw hits
+/vis/scene/add/hits
+
+# Accumulate events
+/vis/scene/endOfEventAction accumulate
+
+# Auto refresh
+/vis/viewer/set/autoRefresh true
+
+#----------------------------------------------------------------------------
+# PNG DISA AKTARMA (rapora koymak icin)
+# Asagidaki iki komutu canli oturumda yazarak (veya bu satirlarin basindaki
+# '#' isaretini kaldirarak) gecerli goruntuyu PNG dosyasi olarak kaydedebilirsiniz.
+# Dosya, build/ klasorune yazilir.
+#----------------------------------------------------------------------------
+/vis/ogl/set/exportFormat png
+#/vis/ogl/export geometri.png
