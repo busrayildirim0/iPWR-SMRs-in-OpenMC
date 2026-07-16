@@ -72,54 +72,48 @@ Kullanıcı arayüzünde "Generate & Run Simulation" butonuna tıkladığında a
 ## Simülasyon Çalışma Akış Şeması (OpenMC & Geant4 Entegrasyonu)
 
 Kullanıcı arayüzünde **"Generate & Run Simulation"** butonuna tıklandığında arka planda yürütülen süreçlerin ve veri akışının şematik gösterimi aşağıda sunulmuştur:
+```mermaid
 
 sequenceDiagram
     autonumber
-    actor Kullanıcı as React Frontend (Arayüz)
-    participant Backend as FastAPI Backend (Sunucu)
+    actor Kullanici as React Frontend
+    participant Backend as FastAPI Backend
     participant ModelGen as Python Model Generator
-    participant OpenMC as OpenMC Solver (WSL)
-    participant Geant4 as Geant4 C++ Solver (WSL)
+    participant OpenMC as OpenMC Solver
+    participant Geant4 as Geant4 Solver
     participant Parser as Python Results Parser
 
-    Kullanıcı->>Backend: POST /api/simulate (Parametreler JSON)
-    Note over Backend: Eşsiz Job ID (UUID) üretilir ve arka plan iş parçacığı (thread) tetiklenir
-    Backend-->>Kullanıcı: 202 Accepted (Job ID döner)
+    Kullanici->>Backend: POST /api/simulate (Parametreler)
+    Note over Backend: Eşsiz Job ID (UUID) üretilir ve asenkron thread tetiklenir
+    Backend-->>Kullanici: 202 Accepted (Job ID)
 
-    alt OpenMC Çalıştırılacaksa
-        Backend->>ModelGen: generate_smr_model() çağrısı
-        Note over ModelGen: Malzeme, Geometri, Ayarlar ve Tally XML dosyaları oluşturulur (materials.xml, geometry.xml vb.)
-        Backend->>OpenMC: subprocess.run('openmc')
-        Note over OpenMC: Monte Carlo Nötron Taşıma Simülasyonu
-        OpenMC-->>Backend: Simülasyon tamamlanır (statepoint.100.h5 oluşur)
+    alt OpenMC Çözümü Aktifse
+        Backend->>ModelGen: generate_smr_model()
+        Note over ModelGen: materials.xml, geometry.xml, settings.xml üretilir
+        Backend->>OpenMC: subprocess.run("openmc")
+        OpenMC-->>Backend: Simülasyon Sonu (statepoint.100.h5)
     end
 
-    alt Geant4 Çalıştırılacaksa
-        Backend->>ModelGen: generate_geant4_macro() çağrısı
-        Note over ModelGen: Parametrik Geant4 .mac dosyası oluşturulur (geant4_run.mac)
-        Backend->>Geant4: subprocess.run('./beavrs_assembly -m ...')
-        Note over Geant4: C++ Monte Carlo Nötron Taşıma Simülasyonu
-        Geant4-->>Backend: Simülasyon tamamlanır (ham CSV ve TXT dosyaları oluşur)
-    end
-
-    opt Gelişmiş Seçenekler Aktifse (Kinetics, Safety Coefs vb.)
-        Note over Backend, OpenMC: Pertürbasyon modelleri kurulur ve yardımcı simülasyonlar (FTC, MTC, Void, Rod Worth) ardışık koşturulur
+    alt Geant4 Çözümü Aktifse
+        Backend->>ModelGen: generate_geant4_macro()
+        Note over ModelGen: geant4_run.mac makro dosyası üretilir
+        Backend->>Geant4: subprocess.run("./beavrs_assembly")
+        Geant4-->>Backend: Simülasyon Sonu (summary.txt ve ham CSV'ler)
     end
 
     Backend->>Parser: parse_openmc_results() / parse_geant4_results()
-    Note over Parser: H5 verileri ve CSV/TXT dosyaları parse edilir, eksenel gürültü filtreleri uygulanır
-    Parser-->>Backend: JSON formatında sonuç veri seti
+    Note over Parser: Ham nükleer veriler ayıklanır ve gürültü filtreleri uygulanır
+    Parser-->>Backend: JSON Sonuç Modeli
 
-    loop Her 1 Saniyede Bir (Polling)
-        Kullanıcı->>Backend: GET /api/job/{job_id}/status & /logs
-        Backend-->>Kullanıcı: Güncel durum (running/parsing/completed) ve loglar
+    loop Her Saniye (Polling)
+        Kullanici->>Backend: GET /api/job/{id}/status & /logs
+        Backend-->>Kullanici: log çıktıları ve durum bilgisi
     end
 
-    Kullanıcı->>Backend: GET /api/job/{job_id}/results
-    Backend-->>Kullanıcı: Nihai simülasyon verileri (k-eff, 2B/3B güç haritaları, grafikler)
-    Note over Kullanıcı: Sonuçlar Plotly grafikleri ve 2B harita olarak ekranda güncellenir
-
-
+    Kullanici->>Backend: GET /api/job/{id}/results
+    Backend-->>Kullanici: Veri seti ve grafik verileri
+mermaid
+```
 
 ### Adım 1: Parametrik XML Giriş Dosyalarının Oluşturulması (`model_generator.py`)
 Kullanıcının girdiği reaktör parametreleri (zenginleştirme, bor konsantrasyonu, pin adımı vb.) Python nesnelerine dönüştürülür. OpenMC API kullanılarak şu 4 kritik XML dosyası oluşturulur:
