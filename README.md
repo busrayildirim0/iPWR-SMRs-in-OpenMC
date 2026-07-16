@@ -69,50 +69,169 @@ Projenin dizin yapısı backend ve frontend kodlarının modüler kalmasını sa
 
 Kullanıcı arayüzünde "Generate & Run Simulation" butonuna tıkladığında arka planda şu adımlar sırasıyla yürütülür:
 
-## Simülasyon Çalışma Akış Şeması (OpenMC & Geant4 Entegrasyonu)
+# SMR NEUTRONICS PLATFORM - TEKNİK DİYAGRAMLAR REHBERİ
 
-Kullanıcı arayüzünde **"Generate & Run Simulation"** butonuna tıklandığında arka planda yürütülen süreçlerin ve veri akışının şematik gösterimi aşağıda sunulmuştur:
+Bu dosya, SMR Modelleme ve Analiz Platformu'nun yazılım mimarisini, veri akışını, Geant4 C++ sınıf yapısını ve yansıtıcı sınır koşullarının vektörel matematik modellerini gösteren teknik diyagramları içerir. Raporunuzda ve GitHub deposunun README dosyasında kullanabilirsiniz.
+
+---
+
+## 1. Genel Simülasyon Çalışma Akışı (Workflow)
+
+Arayüzde simülasyon başlatıldığında backend, çözücü motorlar ve veri ayrıştırıcılar arasındaki iletişim akışı:
+
 ```mermaid
-
 sequenceDiagram
     autonumber
-    actor Kullanici as React Frontend
-    participant Backend as FastAPI Backend
+    actor Arayuz as React Frontend (Arayüz)
+    participant Backend as FastAPI Backend (Sunucu)
     participant ModelGen as Python Model Generator
-    participant OpenMC as OpenMC Solver
-    participant Geant4 as Geant4 Solver
+    participant OpenMC as OpenMC Solver (WSL)
+    participant Geant4 as Geant4 C++ Solver (WSL)
     participant Parser as Python Results Parser
 
-    Kullanici->>Backend: POST /api/simulate (Parametreler)
-    Note over Backend: Eşsiz Job ID (UUID) üretilir ve asenkron thread tetiklenir
-    Backend-->>Kullanici: 202 Accepted (Job ID)
+    Arayuz->>Backend: POST /api/simulate (Parametreler JSON)
+    Note over Backend: Eşsiz Job ID (UUID) üretilir ve asenkron arka plan thread'i tetiklenir
+    Backend-->>Arayuz: 202 Accepted (Job ID döner)
 
-    alt OpenMC Çözümü Aktifse
-        Backend->>ModelGen: generate_smr_model()
-        Note over ModelGen: materials.xml, geometry.xml, settings.xml üretilir
-        Backend->>OpenMC: subprocess.run("openmc")
-        OpenMC-->>Backend: Simülasyon Sonu (statepoint.100.h5)
+    alt OpenMC Çalıştırılacaksa
+        Backend->>ModelGen: generate_smr_model() çağrısı
+        Note over ModelGen: materials.xml, geometry.xml, settings.xml, tallies.xml üretilir
+        Backend->>OpenMC: subprocess.run('openmc')
+        Note over OpenMC: Monte Carlo Nötron Taşıma Çözümü
+        OpenMC-->>Backend: Simülasyon tamamlanır (statepoint.100.h5 oluşur)
     end
 
-    alt Geant4 Çözümü Aktifse
-        Backend->>ModelGen: generate_geant4_macro()
-        Note over ModelGen: geant4_run.mac makro dosyası üretilir
-        Backend->>Geant4: subprocess.run("./beavrs_assembly")
-        Geant4-->>Backend: Simülasyon Sonu (summary.txt ve ham CSV'ler)
+    alt Geant4 Çalıştırılacaksa
+        Backend->>ModelGen: generate_geant4_macro() çağrısı
+        Note over ModelGen: Parametrik Geant4 .mac dosyası oluşturulur (geant4_run.mac)
+        Backend->>Geant4: subprocess.run('./beavrs_assembly -m ...')
+        Note over Geant4: C++ Monte Carlo Nötron Taşıma Çözümü
+        Geant4-->>Backend: Simülasyon tamamlanır (ham CSV ve TXT dosyaları oluşur)
     end
 
     Backend->>Parser: parse_openmc_results() / parse_geant4_results()
-    Note over Parser: Ham nükleer veriler ayıklanır ve gürültü filtreleri uygulanır
-    Parser-->>Backend: JSON Sonuç Modeli
+    Note over Parser: H5 verileri ve CSV/TXT dosyaları parse edilir, eksenel gürültü filtreleri uygulanır
+    Parser-->>Backend: JSON formatında sonuç veri seti
 
-    loop Her Saniye (Polling)
-        Kullanici->>Backend: GET /api/job/{id}/status & /logs
-        Backend-->>Kullanici: log çıktıları ve durum bilgisi
+    loop Her 1 Saniyede Bir (Polling)
+        Arayuz->>Backend: GET /api/job/{job_id}/status & /logs
+        Backend-->>Arayuz: Güncel durum (running/parsing/completed) ve loglar
     end
 
-    Kullanici->>Backend: GET /api/job/{id}/results
-    Backend-->>Kullanici: Veri seti ve grafik verileri
-mermaid
+    Arayuz->>Backend: GET /api/job/{job_id}/results
+    Backend-->>Arayuz: Nihai simülasyon verileri (k-eff, 2B/3B güç haritaları, grafikler)
+```
+
+---
+
+## 2. Geant4 C++ Nesne Yönelimli Yazılım Mimarisi (Class Diagram)
+
+Geant4 çözücü motorunun içinde yer alan C++ sınıflarının birbirleriyle olan ilişkileri ve görev dağılımları:
+
+```mermaid
+classDiagram
+    class ActionInitialization {
+        +BuildForMaster() const
+        +Build() const
+    }
+    class DetectorConstruction {
+        -G4LogicalVolume* fLogicAssembly
+        +Construct() G4VPhysicalVolume*
+        +ReflectRadial() G4bool
+        +ReflectAxial() G4bool
+    }
+    class Materials {
+        -static Materials* fInstance
+        +DefineMaterials()
+        +GetBoronPPM() G4double
+        +GetEnrichment() G4double
+    }
+    class ReactorConfig {
+        -static ReactorConfig* fInstance
+        +NPins() G4int
+        +PinPitch() G4double
+        +HexApothem() G4double
+        +IsHex() G4bool
+    }
+    class PrimaryGeneratorAction {
+        -G4ParticleGun* fParticleGun
+        +GeneratePrimaries(G4Event*)
+    }
+    class EventAction {
+        -G4double fFuelEdep
+        +BeginOfEventAction(const G4Event*)
+        +EndOfEventAction(const G4Event*)
+        +AddFuelEdep(G4double)
+    }
+    class SteppingAction {
+        -EventAction* fEventAction
+        -RunAction* fRunAction
+        +UserSteppingAction(const G4Step*)
+        -ReflectHex(const G4Step*, const ReactorConfig&)
+        -ReflectSquare(const G4Step*, const ReactorConfig&)
+    }
+    class RunAction {
+        -G4Accumulable~G4double~ fEdepTotal
+        -G4Accumulable~G4int~ fFissionCount
+        +BeginOfRunAction(const G4Run*)
+        +EndOfRunAction(const G4Run*)
+        +AddFission(G4int, G4bool)
+    }
+    class FissionBank {
+        -static FissionBank* fInstance
+        -std::vector~G4ThreeVector~ fBank
+        +Deposit(G4ThreeVector, G4int)
+        +SampleSource() G4ThreeVector
+        +CalculateShannonEntropy() G4double
+    }
+    class EigenvalueRunner {
+        -G4int fInactive
+        -G4int fActive
+        +Run()
+    }
+
+    ActionInitialization --> PrimaryGeneratorAction
+    ActionInitialization --> RunAction
+    ActionInitialization --> EventAction
+    ActionInitialization --> SteppingAction
+    DetectorConstruction --> Materials
+    DetectorConstruction --> ReactorConfig
+    SteppingAction --> EventAction
+    SteppingAction --> RunAction
+    SteppingAction --> ReactorConfig
+    SteppingAction --> FissionBank
+    PrimaryGeneratorAction --> FissionBank
+    EigenvalueRunner --> FissionBank
+```
+
+---
+
+## 3. Hegzagonal Yansıtıcı Sınır Mantığı Vektörel Karar Şeması
+
+Nötron hegzagonal sınıra çarptığında, irrasyonel sayı yuvarlamalarından ötürü navigator kilitlenmelerini engelleyen vektörel karar verme adımları:
+
+```mermaid
+flowchart TD
+    A[Nötron Adım Atar Step] --> B{Adım geometrik sınırda mı?}
+    B -- Hayır --> C[Normal izleme devam eder]
+    B -- Evet --> D[Hegzagonal yapının 6 normal vektörü için mesafe hesabı başlar]
+    
+    D --> E[Her k yüzeyi için s_k = pos . n_k hesaplanır]
+    E --> F[Vektör yönü analizi: v_n = dir . n_k]
+    
+    F --> G{v_n > 0 ve s_k > max_s mi?}
+    G -- Hayır --> H[Yüzeyi es geç]
+    G -- Evet --> I[En yakın yansıtıcı yüzey olarak güncelle: best_k = k]
+    
+    I --> J{Tüm 6 yüzey tarandı mı?}
+    J -- Hayır --> E
+    
+    J -- Evet --> K{best_k >= 0 ve max_s >= a - tolerans?}
+    K -- Hayır --> L[Nötron yansımaz - sınırdan sızar veya boşluğa uçar]
+    K -- Evet --> M[Yansıtma Vektörü Hesabı: dir = dir - 2 * v_n * n_k]
+    
+    M --> N[Yeni yön set edilir ve track güncellenir]
+    N --> O[Geant4 navigator kilitlenmesi engellenerek nötron yansıtılır]
 ```
 
 ### Adım 1: Parametrik XML Giriş Dosyalarının Oluşturulması (`model_generator.py`)
