@@ -73,7 +73,6 @@ Kullanıcı arayüzünde "Generate & Run Simulation" butonuna tıkladığında a
 
 Kullanıcı arayüzünde **"Generate & Run Simulation"** butonuna tıklandığında arka planda yürütülen süreçlerin ve veri akışının şematik gösterimi aşağıda sunulmuştur:
 
-```mermaid
 sequenceDiagram
     autonumber
     actor Kullanıcı as React Frontend (Arayüz)
@@ -119,6 +118,7 @@ sequenceDiagram
     Kullanıcı->>Backend: GET /api/job/{job_id}/results
     Backend-->>Kullanıcı: Nihai simülasyon verileri (k-eff, 2B/3B güç haritaları, grafikler)
     Note over Kullanıcı: Sonuçlar Plotly grafikleri ve 2B harita olarak ekranda güncellenir
+
 
 
 ### Adım 1: Parametrik XML Giriş Dosyalarının Oluşturulması (`model_generator.py`)
