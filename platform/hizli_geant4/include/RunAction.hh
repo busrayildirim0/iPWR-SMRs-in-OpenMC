@@ -26,6 +26,8 @@ public:
     void BeginOfRunAction(const G4Run* run) override;
     void EndOfRunAction(const G4Run* run) override;
 
+    static const G4String& GetOutputFileName() { return fOutputFileName; }
+
     enum HistoId {
         kSourceE = 0,
         kFluxE   = 1,
@@ -111,6 +113,7 @@ private:
 
     std::chrono::steady_clock::time_point fWallStart;
 
+    G4bool fHistosCreated = false;
     G4GenericMessenger* fMessenger = nullptr;
 
     static G4String fOutputFileName;

@@ -30,8 +30,18 @@ SteppingAction::SteppingAction(EventAction* eventAction, RunAction* runAction)
     : fEventAction(eventAction), fRunAction(runAction) {}
 
 void SteppingAction::UserSteppingAction(const G4Step* step) {
+    if (!step) return;
+
     const ReactorConfig& cfg = ReactorConfig::Get();
     const G4Track* track = step->GetTrack();
+    if (!track) return;
+
+    const G4StepPoint* prePoint = step->GetPreStepPoint();
+    if (!prePoint) return;
+
+    const G4StepPoint* postPoint = step->GetPostStepPoint();
+    if (!postPoint) return;
+
     const FissionBank& bank = FissionBank::GetInstance();
     static const G4bool kOnly = (std::getenv("SMR_KONLY") != nullptr);
     const G4bool eigenMode = bank.Enabled();
@@ -40,65 +50,83 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
 
     G4AnalysisManager* analysis = G4AnalysisManager::Instance();
 
-    // 1. DOĞRU GÜÇ SKORLAMASI (Gerçek Fisyon Isı Birikimi - edep)
     const G4double edep = step->GetTotalEnergyDeposit();
     if (edep > 0.0 && histoScore) {
-        auto preVol = step->GetPreStepPoint()->GetTouchableHandle()->GetVolume();
+        auto preVol = prePoint->GetPhysicalVolume();
         G4Material* mat = preVol ? preVol->GetLogicalVolume()->GetMaterial() : nullptr;
         const G4String mname = mat ? mat->GetName() : "";
         
-        if (mname == "UO2_Enriched" || mname == "UO2_Gd2O3") {
+        if (mname == "UO2_Enriched" || mname == "UO2_Gd2O3" || mname.find("UO2") != std::string::npos || (preVol && preVol->GetName().find("FuelPV") != std::string::npos)) {
             const G4double edepMeV = edep / MeV;
             fEventAction->AddFuelEdep(edepMeV); // Genel enerji hesabı
             
-            // Z Ekseni için Adımın Orta Noktası (Daha yüksek hassasiyet)
-            G4double zMid = (step->GetPreStepPoint()->GetPosition().z() + 
-                             step->GetPostStepPoint()->GetPosition().z()) / 2.0;
+            // Parçacığın adım attığı orta noktayı (Midpoint) hesapla
+            const G4ThreeVector prePos  = prePoint->GetPosition();
+            const G4ThreeVector postPos = postPoint->GetPosition();
+            const G4double zMidCm = (prePos.z() + postPos.z()) / (2.0 * cm);
+
+            // Aktif Yükseklik Boyutları
+            const G4double activeHeightCm = cfg.ActiveHeight() / cm;
+            const G4double halfZcm = activeHeightCm / 2.0;
+
+            // Z konumunu [0, activeHeightCm] aralığına getir
+            G4double zRel = zMidCm + halfZcm;
+            if (zRel < 0.0) zRel = 0.0;
+            if (zRel >= activeHeightCm) zRel = activeHeightCm - 1e-5;
+
+            // 0..99 Arası Bin İndeksi
+            G4int zBin = static_cast<G4int>((zRel / activeHeightCm) * 100.0);
+            zBin = std::max(0, std::min(zBin, 99));
+
+            // FissionBank Eksenel Skorlama
+            FissionBank::GetInstance().ScoreAxialPower(zBin, 100, edepMeV);
             
-            // Eksenel Güç Profilini enerji birikimi (edep) ile doldur!
-            analysis->FillH1(RunAction::kEdepFuelZ, zMid / cm, edepMeV);
-            
-            // 2D Pin Güç Haritasını enerji birikimi ile doldur
-            if (!cfg.IsHex()) {
-                const G4int n = cfg.NPins();
+            // H1 Histogramı doldurma adımı
+            analysis->FillH1(RunAction::kEdepFuelZ, zMidCm, edepMeV);
+
+            if (preVol) {
                 const G4int copyNo = preVol->GetCopyNo();
-                analysis->FillH2(RunAction::kFuelPinEdepMap, copyNo % n, copyNo / n, edepMeV);
-            } else {
-                const G4double pitch = cfg.PinPitch();
-                const G4double x = preVol->GetObjectTranslation().x();
-                const G4double y = preVol->GetObjectTranslation().y();
+                const G4int col = cfg.GetPinCol(copyNo);
+                const G4int row = cfg.GetPinRow(copyNo);
+                const G4int gridRes = cfg.IsHex() ? 15 : cfg.NPins();
                 
-                // Fiziksel kartezyen koordinatları doğrudan piksel sütun/satırına eşle
-                const G4int col = (G4int)std::floor(x / pitch + 8.5);
-                const G4int row = (G4int)std::floor(y / pitch + 8.5);
-                
-                if (row >= 0 && row < 17 && col >= 0 && col < 17) {
+                if (col >= 0 && col < gridRes && row >= 0 && row < gridRes) {
                     analysis->FillH2(RunAction::kFuelPinEdepMap, col, row, edepMeV);
+                    FissionBank::GetInstance().ScorePinPower(col, row, gridRes, edepMeV);
                 }
             }
         }
     }
 
-    // 2. NÖTRON KONTROLÜ VE HIZLI AKI (Track-Length)
     if (track->GetDefinition() != G4Neutron::Definition()) {
         const_cast<G4Track*>(track)->SetTrackStatus(fStopAndKill);
         return;
     }
 
-    const G4double ePre  = step->GetPreStepPoint()->GetKineticEnergy();
+    const G4double ePre  = prePoint->GetKineticEnergy();
     const G4double stepL = step->GetStepLength();
     if (ePre > 0.0 && stepL > 0.0) {
         const G4double stepLMm = stepL / mm;
         if (histoScore) {
             analysis->FillH1(RunAction::kFluxE, ePre / MeV, stepLMm);
-            
+            const G4double ePreMeV = ePre / MeV;
+            const G4double E_min = 1.0e-9;
+            const G4double E_max = 20.0;
+            if (ePreMeV >= E_min && ePreMeV < E_max) {
+                const G4double logMin = std::log10(E_min);
+                const G4double logMax = std::log10(E_max);
+                const G4double logVal = std::log10(ePreMeV);
+                const G4int bin = static_cast<G4int>((logVal - logMin) / (logMax - logMin) * 200.0);
+                if (bin >= 0 && bin < 200) {
+                    FissionBank::GetInstance().ScoreEnergyFlux(bin, stepLMm);
+                }
+            }
         }
 
         if (fullScore) {
             fRunAction->AddStep();
             fRunAction->AddTrackLength(stepLMm);
-            auto preVol =
-                step->GetPreStepPoint()->GetTouchableHandle()->GetVolume();
+            auto preVol = prePoint->GetPhysicalVolume();
             G4Material* mat =
                 preVol ? preVol->GetLogicalVolume()->GetMaterial() : nullptr;
             const G4String matName = mat ? mat->GetName() : "";
@@ -120,30 +148,38 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
     }
 
     if (fullScore) {
-        const G4double ePost = step->GetPostStepPoint()->GetKineticEnergy();
+        const G4double ePost = postPoint->GetKineticEnergy();
         if (ePre >= kThermalCut * MeV && ePost < kThermalCut * MeV &&
             fEventAction->MarkThermalizedNeutron(track->GetTrackID())) {
             fRunAction->AddThermalNeutron();
         }
     }
 
-    const G4StepPoint* postPoint = step->GetPostStepPoint();
     const G4bool thermalIncident = (ePre < kThermalCut * MeV);
     const G4VProcess* proc = postPoint->GetProcessDefinedStep();
     if (proc) {
         const G4String& pname = proc->GetProcessName();
         if (pname.find("ission") != G4String::npos) {
-            G4TrackVector* secondaries = fpSteppingManager->GetfSecondary();
+            G4TrackVector* secondaries = fpSteppingManager ? fpSteppingManager->GetfSecondary() : nullptr;
             G4int nu = 0;
-            for (auto* sec : *secondaries) {
-                if (sec->GetDefinition() == G4Neutron::Definition()) {
-                    ++nu;
-                    sec->SetTrackStatus(fStopAndKill);
+            const G4bool eigenMode = FissionBank::GetInstance().Enabled();
+
+            if (secondaries) {
+                for (auto* sec : *secondaries) {
+                    if (sec && sec->GetDefinition() == G4Neutron::Definition()) {
+                        ++nu;
+                        if (eigenMode) {
+                            sec->SetTrackStatus(fStopAndKill);
+                        }
+                    } else if (sec) {
+                        const_cast<G4Track*>(sec)->SetTrackStatus(fStopAndKill);
+                    }
                 }
             }
             fRunAction->AddFission(nu, thermalIncident);
             fEventAction->AddFissionNeutrons(nu);
-            if (nu > 0 && FissionBank::GetInstance().Enabled()) {
+
+            if (nu > 0 && eigenMode) {
                 FissionBank::GetInstance().Deposit(postPoint->GetPosition(), nu);
             }
         } else if (pname.find("apture") != G4String::npos) {
@@ -153,8 +189,15 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
         } else if (pname.find("nelastic") != G4String::npos) {
             fRunAction->AddInelastic();
             G4int nOut = 0;
-            for (auto* sec : *fpSteppingManager->GetfSecondary()) {
-                if (sec->GetDefinition() == G4Neutron::Definition()) ++nOut;
+            G4TrackVector* secondaries = fpSteppingManager ? fpSteppingManager->GetfSecondary() : nullptr;
+            if (secondaries) {
+                for (auto* sec : *secondaries) {
+                    if (sec && sec->GetDefinition() == G4Neutron::Definition()) {
+                        ++nOut;
+                    } else if (sec) {
+                        const_cast<G4Track*>(sec)->SetTrackStatus(fStopAndKill);
+                    }
+                }
             }
             if (nOut == 0) fRunAction->AddOtherAbsorption(thermalIncident);
         }
@@ -221,7 +264,9 @@ void SteppingAction::ReflectSquare(const G4Step* step,
         return;
     }
     if (reflected) {
-        step->GetTrack()->SetMomentumDirection(dir);
+        dir = dir.unit();
+        const_cast<G4Track*>(track)->SetMomentumDirection(dir);
+        const_cast<G4StepPoint*>(postPoint)->SetMomentumDirection(dir);
         fRunAction->AddBoundaryReflection();
     }
 }
@@ -240,8 +285,6 @@ void SteppingAction::ReflectHex(const G4Step* step, const ReactorConfig& cfg) {
     G4bool reflected = false, radialFace = false, axialFace = false;
     G4bool leaked = false;
 
-    // 🛡️ 2. Z Ekseni (Alt/Üst) Yansıtması
-    // Toleransı 1.0 mm gibi geniş ve güvenli bir değere alıyoruz (Çünkü dış sınırda olduğumuzu zaten biliyoruz)
     if (std::abs(pos.z()) >= halfZ - 1.0 * mm && pos.z() * dir.z() > 0.0) {
         axialFace = true;
         if (DetectorConstruction::ReflectAxial()) {
@@ -250,10 +293,6 @@ void SteppingAction::ReflectHex(const G4Step* step, const ReactorConfig& cfg) {
         } else leaked = true;
     }
 
-    // 🛡️ 3. Radyal (Hegzagonal Yüzey) Yansıtması
-    // 'else' kullanmıyoruz! Parçacık köşede (hem Z hem Radyal sınırda) olabilir.
-    // 🛡️ 3. Radyal (Hegzagonal Yüzey) Yansıtması
-    // Köşelerde yuvarlama ve çakışma hatalarını gidermek için en yakın/en yüksek projeksiyon değerine sahip yüzeyi seçiyoruz.
     G4int best_k = -1;
     G4double max_s = -1.0e9;
     G4double best_vn = 0.0;
@@ -296,7 +335,8 @@ void SteppingAction::ReflectHex(const G4Step* step, const ReactorConfig& cfg) {
     }
     if (reflected) {
         dir = dir.unit();
-        track->SetMomentumDirection(dir);
+        const_cast<G4Track*>(track)->SetMomentumDirection(dir);
+        const_cast<G4StepPoint*>(postPoint)->SetMomentumDirection(dir);
         fRunAction->AddBoundaryReflection();
     }
 }

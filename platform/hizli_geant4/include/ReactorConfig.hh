@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include <mutex>
+
 class G4GenericMessenger;
 
 class ReactorConfig {
@@ -70,6 +72,26 @@ public:
 
     const std::vector<std::string>& SquareMap() const { return fSquareMap; }
 
+    G4int GetPinCol(G4int copyNo) const {
+        if (copyNo < 0) return -1;
+        if (fLattice == Lattice::Square) {
+            return (fNPins > 0) ? (copyNo % fNPins) : -1;
+        }
+        std::lock_guard<std::mutex> lock(fPinMapMutex);
+        if (copyNo < (G4int)fPinCols.size()) return fPinCols[copyNo];
+        return -1;
+    }
+
+    G4int GetPinRow(G4int copyNo) const {
+        if (copyNo < 0) return -1;
+        if (fLattice == Lattice::Square) {
+            return (fNPins > 0) ? (copyNo / fNPins) : -1;
+        }
+        std::lock_guard<std::mutex> lock(fPinMapMutex);
+        if (copyNo < (G4int)fPinRows.size()) return fPinRows[copyNo];
+        return -1;
+    }
+
     struct Cell {
         G4double x;
         G4double y;
@@ -106,6 +128,9 @@ private:
     G4String fFuelMat = "UO2";
 
     std::vector<std::string> fSquareMap;
+    mutable std::mutex fPinMapMutex;
+    mutable std::vector<G4int> fPinCols;
+    mutable std::vector<G4int> fPinRows;
 
     static ReactorConfig* fInstance;
 };

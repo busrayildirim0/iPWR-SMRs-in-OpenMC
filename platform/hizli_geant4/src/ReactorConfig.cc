@@ -150,13 +150,29 @@ void ReactorConfig::SelectPreset(const G4String& name) {
 
 std::vector<ReactorConfig::Cell> ReactorConfig::BuildCells() const {
     std::vector<Cell> cells;
+    std::lock_guard<std::mutex> lock(fPinMapMutex);
+    fPinCols.clear();
+    fPinRows.clear();
+
     if (fLattice == Lattice::Hex) {
         const G4double pitch = fPinPitch;
         const G4int nRings = 6;
         const int dir[6][3] = {{+1,-1,0},{+1,0,-1},{0,+1,-1},
                                {-1,+1,0},{-1,0,+1},{0,-1,+1}};
 
-        cells.push_back({0.0, 0.0, 'G'});
+        const G4double offset = 6.5 * pitch;
+
+        auto addHexCell = [&](G4double x, G4double y, char type) {
+            cells.push_back({x, y, type});
+            G4int col = (G4int)std::floor(((x + offset) / (2.0 * offset)) * 15.0);
+            G4int row = (G4int)std::floor(((y + offset) / (2.0 * offset)) * 15.0);
+            if (col < 0) col = 0; if (col > 14) col = 14;
+            if (row < 0) row = 0; if (row > 14) row = 14;
+            fPinCols.push_back(col);
+            fPinRows.push_back(row);
+        };
+
+        addHexCell(0.0, 0.0, 'G');
         for (G4int d = 1; d <= nRings; ++d) {
             int cx = dir[4][0]*d, cy = dir[4][1]*d, cz = dir[4][2]*d;
             const bool ringHasTubes = (d == 3 || d == 4 || d == 5);
@@ -167,7 +183,7 @@ std::vector<ReactorConfig::Cell> ReactorConfig::BuildCells() const {
                     const G4double x = pitch * (q + r/2.0);
                     const G4double y = pitch * (std::sqrt(3.0)/2.0) * r;
                     const bool isCorner = (idx % d == 0);
-                    cells.push_back({x, y, (ringHasTubes && isCorner) ? 'G' : 'F'});
+                    addHexCell(x, y, (ringHasTubes && isCorner) ? 'G' : 'F');
                     ++idx;
                     cx += dir[side][0]; cy += dir[side][1]; cz += dir[side][2];
                 }
@@ -185,6 +201,8 @@ std::vector<ReactorConfig::Cell> ReactorConfig::BuildCells() const {
             const G4double y = j * fPinPitch - offset;
             const char c = (i < (G4int)row.size()) ? row[i] : 'F';
             cells.push_back({x, y, c});
+            fPinCols.push_back(i);
+            fPinRows.push_back(j);
         }
     }
     return cells;

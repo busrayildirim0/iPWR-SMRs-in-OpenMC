@@ -8,10 +8,15 @@
 # Fuel Material: UO2
 # Clad Material: Zircaloy4
 # Particles per Batch: 1000
-# Batches (Active/Inactive): 10 / 4
+# Batches (Active/Inactive): 20 / 5
 # =====================================================================
 lattice_type,pin_pitch,fuel_material,clad_material,enrichment,soluble_boron,fuel_temperature,coolant_temperature,coolant_density,cladding_thickness,poison_fraction,control_rod_state,control_rod_material,particles,batches,k_eff,k_eff_std,reactivity,peak_power_factor
-Square,1.2598,UO2,Zircaloy4,3.9897,1861.2354,679.6883,546.6622,0.7703,0.0516,4.3674,Fully Withdrawn,Ag-In-Cd,1000,10,1.054871,0.024171,0.052017,1.7633
-Square,1.2598,UO2,Zircaloy4,2.9045,1309.5739,1077.4894,556.7044,0.7553,0.0799,3.6301,Fully Withdrawn,Ag-In-Cd,1000,10,0.938323,0.007712,-0.065731,1.6092
-Square,1.2598,UO2,Zircaloy4,4.5071,410.4956,807.2531,503.1013,0.8357,0.0567,1.6622,Fully Withdrawn,Ag-In-Cd,1000,10,1.210481,0.02365,0.173882,1.7305
-Square,1.2598,UO2,Zircaloy4,2.2003,523.5274,990.9066,582.5282,0.7165,0.0334,6.7683,Fully Withdrawn,Ag-In-Cd,1000,10,0.91896,0.01269,-0.088186,2.0478
+Square,1.2598,UO2,Zircaloy4,3.8697,1453.6686,799.1506,550.5652,0.7645,0.0509,3.277,Fully Withdrawn,Ag-In-Cd,1000,20,1.059961,0.005001,0.056569,1.5698
+Square,1.2598,UO2,Zircaloy4,2.7136,1621.9303,1080.4265,589.7804,0.7057,0.0773,4.0702,Fully Withdrawn,Ag-In-Cd,1000,20,0.924642,0.009086,-0.0815,1.447
+Square,1.2598,UO2,Zircaloy4,3.2654,267.2795,730.0133,575.6616,0.7268,0.0448,7.4603,Fully Withdrawn,Ag-In-Cd,1000,20,1.103642,0.006892,0.093909,1.5567
+Square,1.2598,UO2,Zircaloy4,2.9808,488.2884,1004.6647,529.0493,0.7968,0.0572,3.0137,Fully Withdrawn,Ag-In-Cd,1000,20,1.074646,0.00546,0.069461,1.4714
+Square,1.2598,UO2,Zircaloy4,3.5324,966.9922,946.7934,537.5356,0.784,0.0353,7.1218,Fully Withdrawn,Ag-In-Cd,1000,20,1.054832,0.01015,0.051982,1.5142
+Square,1.2598,UO2,Zircaloy4,4.6671,1931.3387,888.903,500.0482,0.8403,0.0681,0.5291,Fully Withdrawn,Ag-In-Cd,1000,20,1.128312,0.009035,0.11372,1.4045
+Square,1.2598,UO2,Zircaloy4,4.954,1388.0195,710.584,592.1586,0.7021,0.0454,1.8592,Fully Withdrawn,Ag-In-Cd,1000,20,1.187588,0.007021,0.157957,1.6566
+Square,1.2598,UO2,Zircaloy4,2.086,702.4445,1020.4765,568.188,0.7381,0.0622,5.9195,Fully Withdrawn,Ag-In-Cd,1000,20,0.910733,0.005665,-0.098016,1.6864
+Square,1.2598,UO2,Zircaloy4,4.3501,192.0598,1160.1417,517.2927,0.8144,0.0728,5.1081,Fully Withdrawn,Ag-In-Cd,1000,20,1.182515,0.006064,0.154344,1.5479

@@ -163,37 +163,6 @@ RunAction::RunAction() {
             .SetRange("level >= 0");
     }
 
-    auto analysis = G4AnalysisManager::Instance();
-    analysis->SetDefaultFileType(fOutputFileType);
-    analysis->SetVerboseLevel(fAnalysisVerbose);
-    analysis->SetNtupleMerging(true);
-
-    analysis->CreateH1("source_E", "Source neutron energy;E [MeV];Counts",
-                       200, 1.0e-9, 20.0, "none", "none", "log");
-    analysis->CreateH1("flux_E", "Neutron flux spectrum;E [MeV];Track length [mm]",
-                       200, 1.0e-9, 20.0, "none", "none", "log");
-    analysis->CreateH1("edep_fuel", "Energy deposited in fuel per event;E [MeV];Events",
-                       100, 0.0, 5.0);
-    analysis->CreateH1("flux_E_fuel",
-                       "Fuel neutron raw track-length spectrum;E [MeV];Track length [mm]",
-                       200, 1.0e-9, 20.0, "none", "none", "log");
-    analysis->CreateH1("flux_E_moderator",
-                       "Moderator neutron raw track-length spectrum;E [MeV];Track length [mm]",
-                       200, 1.0e-9, 20.0, "none", "none", "log");
-    analysis->CreateH1("flux_E_zircaloy",
-                       "Zircaloy neutron raw track-length spectrum;E [MeV];Track length [mm]",
-                       200, 1.0e-9, 20.0, "none", "none", "log");
-    analysis->CreateH1("flux_E_gas",
-                       "Gas-gap/air neutron raw track-length spectrum;E [MeV];Track length [mm]",
-                       200, 1.0e-9, 20.0, "none", "none", "log");
-    analysis->CreateH1("edep_fuel_z",
-                       "Axial fuel energy deposition;z [cm];Energy [MeV]",
-                       100, -ReactorConfig::Get().ActiveHeight() / (2.0 * cm), ReactorConfig::Get().ActiveHeight() / (2.0 * cm));
-
-    analysis->CreateH2("edep_fuel_pin_map",
-                       "Fuel pin energy deposition map;Column;Row;Energy [MeV]",
-                       BEAVRS::kNPins, -0.5, BEAVRS::kNPins - 0.5,
-                       BEAVRS::kNPins, -0.5, BEAVRS::kNPins - 0.5);
 }
 
 RunAction::~RunAction() {
@@ -208,15 +177,45 @@ void RunAction::BeginOfRunAction(const G4Run*) {
     auto analysis = G4AnalysisManager::Instance();
     analysis->SetDefaultFileType(fOutputFileType);
     analysis->SetVerboseLevel(fAnalysisVerbose);
-    analysis->OpenFile(fOutputFileName);
+
+    if (analysis->GetH2Id("edep_fuel_pin_map", false) < 0) {
+        analysis->CreateH1("source_E", "Source neutron energy;E [MeV];Counts",
+                           200, 1.0e-9, 20.0, "none", "none", "log");
+        analysis->CreateH1("flux_E", "Neutron flux spectrum;E [MeV];Track length [mm]",
+                           200, 1.0e-9, 20.0, "none", "none", "log");
+        analysis->CreateH1("edep_fuel", "Energy deposited in fuel per event;E [MeV];Events",
+                           100, 0.0, 5.0);
+        analysis->CreateH1("flux_E_fuel",
+                           "Fuel neutron raw track-length spectrum;E [MeV];Track length [mm]",
+                           200, 1.0e-9, 20.0, "none", "none", "log");
+        analysis->CreateH1("flux_E_moderator",
+                           "Moderator neutron raw track-length spectrum;E [MeV];Track length [mm]",
+                           200, 1.0e-9, 20.0, "none", "none", "log");
+        analysis->CreateH1("flux_E_zircaloy",
+                           "Zircaloy neutron raw track-length spectrum;E [MeV];Track length [mm]",
+                           200, 1.0e-9, 20.0, "none", "none", "log");
+        analysis->CreateH1("flux_E_gas",
+                           "Gas-gap/air neutron raw track-length spectrum;E [MeV];Track length [mm]",
+                           200, 1.0e-9, 20.0, "none", "none", "log");
+        analysis->CreateH1("edep_fuel_z",
+                           "Axial fuel energy deposition;z [cm];Energy [MeV]",
+                           100, -ReactorConfig::Get().ActiveHeight() / (2.0 * cm), ReactorConfig::Get().ActiveHeight() / (2.0 * cm));
+
+        const G4int gridRes = ReactorConfig::Get().IsHex() ? 15 : ReactorConfig::Get().NPins();
+        analysis->CreateH2("edep_fuel_pin_map",
+                           "Fuel pin energy deposition map;Column;Row;Energy [MeV]",
+                           gridRes, -0.5, gridRes - 0.5,
+                           gridRes, -0.5, gridRes - 0.5);
+        fHistosCreated = true;
+    }
+
+    if (!analysis->IsOpenFile()) {
+        analysis->OpenFile(fOutputFileName);
+    }
 }
 
 void RunAction::EndOfRunAction(const G4Run* run) {
     G4AccumulableManager::Instance()->Merge();
-
-    auto analysis = G4AnalysisManager::Instance();
-    analysis->Write();
-    analysis->CloseFile();
 
     if (!IsMaster()) return;
 

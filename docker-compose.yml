@@ -1,21 +1,33 @@
 version: '3.8'
 
 services:
-  smr-platform:
-    build: .
-    container_name: smr-platform-container
+  smr-core:
+    build:
+      context: .
+      dockerfile: platform/backend/Dockerfile
+    image: busrayildiriim/smr-core:latest
+    container_name: smr-core-container
     ports:
       - "8000:8000"
     volumes:
-      # Mount the nuclear cross section data directory from host to container.
-      # Update the left side of the colon to match the path of your local cross sections directory.
-      # Example WSL: - /home/busra/openmc_project:/data
-      # Example Windows: - C:/Users/Hp/openmc_project:/data
-      - /home/busra/openmc_project:/data
-      
-      # Mount the backend run files to the host for persistence and easy log viewing
+      # Mount cross sections from host (.env configurable)
+      - ${OPENMC_CROSS_SECTIONS_DIR:-/home/busra/openmc_project}:/data
+      # Mount runs folder for persistent output results
       - ./platform/backend/runs:/app/platform/backend/runs
     environment:
-      # Env variable pointing to cross sections config inside the mounted /data folder
       - OPENMC_CROSS_SECTIONS=/data/endfb-vii.1-hdf5/cross_sections.xml
+      - DOCKER_ENV=1
+      - GEANT4_EXE=/app/platform/hizli_geant4/beavrs_assembly
+    restart: always
+
+  web-dashboard:
+    build:
+      context: .
+      dockerfile: platform/frontend/Dockerfile
+    image: busrayildiriim/web-dashboard:latest
+    container_name: web-dashboard-container
+    ports:
+      - "80:80"
+    depends_on:
+      - smr-core
     restart: always

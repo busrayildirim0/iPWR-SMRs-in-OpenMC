@@ -4,7 +4,10 @@
 #include "EigenvalueRunner.hh"
 #include "Constants.hh"
 #include "FissionBank.hh"
+#include "ReactorConfig.hh"
+#include "RunAction.hh"
 
+#include "G4AnalysisManager.hh"
 #include "G4GenericMessenger.hh"
 #include "G4RunManager.hh"
 
@@ -62,6 +65,13 @@ void EigenvalueRunner::Run() {
     for (G4int gen = 0; gen < total; ++gen) {
         runManager->BeamOn(fHistories);
     }
+
+    auto analysis = G4AnalysisManager::Instance();
+    analysis->Write();
+    analysis->CloseFile();
+
+    const G4int gridRes = ReactorConfig::Get().IsHex() ? 15 : ReactorConfig::Get().NPins();
+    bank.WriteCsvOutputs(RunAction::GetOutputFileName(), gridRes, ReactorConfig::Get().ActiveHeight() / CLHEP::cm);
 
     G4cout << "\n========================= k-eigenvalue result =====================\n"
            << "  k_eff = " << std::fixed << std::setprecision(5)

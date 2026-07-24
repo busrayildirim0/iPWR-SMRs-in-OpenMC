@@ -216,8 +216,9 @@ export default function AssemblyVisualizer({
     
     let values = [];
     
-    if (activeMap === 'power' && results.pin_power_map) {
-      values = results.pin_power_map.flat().filter(v => v > 0);
+    if (activeMap === 'power' && (results.relative_power_map || results.pin_power_map)) {
+      const powerMap = results.relative_power_map || results.pin_power_map;
+      values = powerMap.flat().filter(v => v > 0);
     } else if (activeMap === 'flux' && results.flux_map) {
       values = results.flux_map.flat();
     } else if (activeMap === 'absorption' && results.absorption_map) {
@@ -236,14 +237,15 @@ export default function AssemblyVisualizer({
     if (!results || activeMap === 'none') return null;
     
     if (activeMap === 'power') {
-      if (latticeType === 'Square' && results.pin_power_map) {
-        const val = results.pin_power_map[pin.row]?.[pin.col] || 0;
+      const powerMap = results.relative_power_map || results.pin_power_map;
+      if (latticeType === 'Square' && powerMap) {
+        const val = powerMap[pin.row]?.[pin.col] || 0;
         return val > 0 ? getHeatmapColor(val, heatmapRange.min, heatmapRange.max) : 'rgba(30, 41, 59, 0.4)';
-      } else if (latticeType === 'Hexagonal' && results.pin_power_map) {
+      } else if (latticeType === 'Hexagonal' && powerMap) {
         const offset = 6.5 * pinPitch;
         const colIdx = Math.floor(((pin.x + offset) / (2 * offset)) * 15);
         const rowIdx = Math.floor(((offset - pin.y) / (2 * offset)) * 15);
-        const val = results.pin_power_map[rowIdx]?.[colIdx] || 0;
+        const val = powerMap[rowIdx]?.[colIdx] || 0;
         return val > 0 ? getHeatmapColor(val, heatmapRange.min, heatmapRange.max) : 'rgba(30, 41, 59, 0.4)';
       }
     } else {
@@ -284,16 +286,17 @@ export default function AssemblyVisualizer({
 
   const getPinValue = (pin) => {
     if (!results || !pin) return 'N/A';
-    if (activeMap === 'power' && results.pin_power_map) {
+    const powerMap = results.relative_power_map || results.pin_power_map;
+    if (activeMap === 'power' && powerMap) {
       const val = latticeType === 'Square'
-        ? results.pin_power_map[pin.row]?.[pin.col]
+        ? powerMap[pin.row]?.[pin.col]
         : (() => {
             const offset = 6.5 * pinPitch;
             const colIdx = Math.floor(((pin.x + offset) / (2 * offset)) * 15);
             const rowIdx = Math.floor(((offset - pin.y) / (2 * offset)) * 15);
-            return results.pin_power_map[rowIdx]?.[colIdx];
+            return powerMap[rowIdx]?.[colIdx];
           })();
-      return val !== undefined && val !== null ? `${val.toExponential(4)} W/cm³` : '0.0000e+0 W/cm³';
+      return val !== undefined && val !== null ? `${val.toFixed(4)} (P/P_avg)` : '0.0000 (P/P_avg)';
     }
     const mapData = activeMap === 'flux' ? results.flux_map : results.absorption_map;
     if (!mapData) return 'N/A';
