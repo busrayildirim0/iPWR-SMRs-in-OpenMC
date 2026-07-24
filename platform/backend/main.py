@@ -229,13 +229,21 @@ def generate_geant4_macro(run_dir, params: SimulationParams, prefix="geant4_run"
     print(f"Geant4 macro generated at: {macro_path}")
     return macro_path
 
+
 def run_geant4_sync(run_dir, macro_path, params: SimulationParams = None):
     import sys
     is_linux = sys.platform == 'linux'
     
-    g4_exe = "/mnt/c/Users/Hp/OneDrive/Masaüstü/SMRs modeling and analysis/platform/hizli_geant4/build/beavrs_assembly"
+    g4_exe = os.getenv("GEANT4_EXE", "/mnt/c/Users/Hp/OneDrive/Masaüstü/SMRs modeling and analysis/platform/hizli_geant4/build/beavrs_assembly")
+    is_docker = os.getenv("DOCKER_ENV") == "1"
     
-    if is_linux:
+    if is_docker:
+        cmd = [
+            "micromamba", "run", "-n", "base",
+            g4_exe, "-m", macro_path
+        ]
+        cwd_dir = run_dir
+    elif is_linux:
         cmd = [
             "bash", "-c",
             f"source /home/busra/geant4/geant4-install/bin/geant4.sh && "
@@ -608,7 +616,8 @@ integrator.integrate()
             jobs[job_id]["status"] = "running"
             jobs[job_id]["logs"] += "\nStarting Geant4 Monte Carlo Simulation in WSL...\n"
             
-            g4_exe = "/mnt/c/Users/Hp/OneDrive/Masaüstü/SMRs modeling and analysis/platform/hizli_geant4/build/beavrs_assembly"
+            g4_exe = os.getenv("GEANT4_EXE", "/mnt/c/Users/Hp/OneDrive/Masaüstü/SMRs modeling and analysis/platform/hizli_geant4/build/beavrs_assembly")
+            is_docker = os.getenv("DOCKER_ENV") == "1"
             
             # Setup environment variables for Geant4 run, purging conda variables to prevent library mismatches
             g4_env = {}
@@ -632,7 +641,13 @@ integrator.integrate()
             g4_env["G4NEUTRONHPDATA"] = "/home/busra/geant4/geant4-install/share/Geant4/data/ENDF-VII.1"
             g4_env["G4PARTICLEHPDATA"] = "/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4"
                 
-            if is_linux:
+            if is_docker:
+                cmd_g4 = [
+                    "micromamba", "run", "-n", "base",
+                    g4_exe, "-m", macro_path
+                ]
+                cwd_g4 = run_dir
+            elif is_linux:
                 cmd_g4 = [
                     "bash", "-c",
                     f"source /home/busra/geant4/geant4-install/bin/geant4.sh && "

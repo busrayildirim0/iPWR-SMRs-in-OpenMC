@@ -711,10 +711,17 @@ export default function Dashboard() {
     let zData = null;
     let colorscale = 'Inferno';
     let label = title;
+    let zmin = undefined;
+    let zmax = undefined;
     
-    if (overlay === 'power' && res.pin_power_map) {
-      zData = res.pin_power_map;
+    const powerMap = res.relative_power_map || res.pin_power_map;
+    
+    if (overlay === 'power' && powerMap) {
+      zData = powerMap;
       label = title + ' - Pin Power Map';
+      zmin = 0.0;
+      zmax = 1.6;
+      colorscale = 'Reds';
     } else if (overlay === 'flux' && res.flux_map) {
       zData = res.flux_map;
       label = title + ' - Neutron Flux';
@@ -731,6 +738,8 @@ export default function Dashboard() {
         type: 'heatmap',
         colorscale: colorscale,
         showscale: true,
+        zmin: zmin,
+        zmax: zmax,
         colorbar: { thickness: 12, len: 0.9 }
       }],
       layout: {
@@ -770,8 +779,8 @@ export default function Dashboard() {
       }],
       layout: {
         title: title,
-        xaxis: { title: 'Energy (eV)', type: 'log', gridcolor: '#3A3E45' },
-        yaxis: { title: 'Flux (neutrons/cm²-s)', type: 'log', gridcolor: '#3A3E45' },
+        xaxis: { title: 'Neutron Energy (eV)', type: 'log', gridcolor: '#3A3E45' },
+        yaxis: { title: 'Normalized Flux [ϕ(u)/ϕ_tot]', type: 'log', gridcolor: '#3A3E45' },
         margin: { l: 55, r: 15, t: 35, b: 45 },
         height: 260,
         paper_bgcolor: 'rgba(0,0,0,0)',
@@ -783,12 +792,13 @@ export default function Dashboard() {
 
   const getAxialPowerPlot = (res, title, color) => {
     if (!res?.axial_power_profile) return null;
-    const levels = Array.from({ length: res.axial_power_profile.length }, (_, i) => i + 1);
+    const n = res.axial_power_profile.length;
+    const zHeights = res.axial_z_heights || res.axial_power_profile.map((_, i) => ((i + 0.5) / n) * 200);
     const profile = res.axial_power_profile;
     return {
       data: [{
         x: profile,
-        y: levels,
+        y: zHeights,
         type: 'scatter',
         mode: 'lines',
         name: 'Axial Power',
@@ -797,11 +807,11 @@ export default function Dashboard() {
       layout: {
         title: title,
         xaxis: { 
-          title: lang === 'en' ? 'Relative Power' : 'Göreceli Güç', 
+          title: lang === 'en' ? 'Relative Power (P/P_avg)' : 'Göreceli Güç (P/P_avg)', 
           gridcolor: '#3A3E45',
           range: [0, 2.0]
         },
-        yaxis: { title: lang === 'en' ? 'Axial Mesh Level' : 'Eksenel Seviye', gridcolor: '#3A3E45' },
+        yaxis: { title: lang === 'en' ? 'Active Height (cm)' : 'Aktif Yükseklik (cm)', gridcolor: '#3A3E45' },
         margin: { l: 45, r: 15, t: 35, b: 35 },
         height: 260,
         paper_bgcolor: 'rgba(0,0,0,0)',
@@ -1037,12 +1047,13 @@ export default function Dashboard() {
 
   const axialPowerPlot = useMemo(() => {
     if (!simulationResults?.axial_power_profile) return null;
-    const levels = Array.from({ length: 200 }, (_, i) => i + 1);
+    const n = simulationResults.axial_power_profile.length;
+    const zHeights = simulationResults.axial_z_heights || simulationResults.axial_power_profile.map((_, i) => ((i + 0.5) / n) * 200);
     const profile = simulationResults.axial_power_profile;
     return {
       data: [{
         x: profile,
-        y: levels,
+        y: zHeights,
         type: 'scatter',
         mode: 'lines',
         name: 'Axial Power',
@@ -1055,7 +1066,7 @@ export default function Dashboard() {
           gridcolor: '#1e293b',
           range: [0, 2.0]
         },
-        yaxis: { title: lang === 'en' ? 'Axial Mesh Level (Z-axis)' : 'Eksenel Seviye (Z Ekseni)', gridcolor: '#1e293b' },
+        yaxis: { title: lang === 'en' ? 'Active Height (cm)' : 'Aktif Yükseklik (cm)', gridcolor: '#1e293b' },
         margin: { l: 50, r: 20, t: 40, b: 40 },
         height: 280
       }
@@ -2994,7 +3005,7 @@ export default function Dashboard() {
                           <PlotlyChart
                             data={[
                               {
-                                y: Array.from({ length: 100 }, (_, i) => i * (200 / 100)), // height z
+                                y: simulationResults.openmc.axial_z_heights || Array.from({ length: 100 }, (_, i) => i * 2.0),
                                 x: simulationResults.openmc.axial_power_profile,
                                 type: 'scatter',
                                 mode: 'lines',
@@ -3002,7 +3013,7 @@ export default function Dashboard() {
                                 line: { color: '#3b82f6', width: 2 }
                               },
                               {
-                                y: Array.from({ length: 100 }, (_, i) => i * (200 / 100)),
+                                y: simulationResults.geant4.axial_z_heights || Array.from({ length: 100 }, (_, i) => i * 2.0),
                                 x: simulationResults.geant4.axial_power_profile,
                                 type: 'scatter',
                                 mode: 'lines',
@@ -3012,7 +3023,7 @@ export default function Dashboard() {
                             ]}
                             layout={{
                               title: 'Axial Power Distribution Comparison',
-                              xaxis: { title: 'Relative Power', gridcolor: '#1e293b' },
+                              xaxis: { title: 'Relative Power (P/P_avg)', gridcolor: '#1e293b', range: [0, 2.0] },
                               yaxis: { title: 'Active Height (cm)', gridcolor: '#1e293b' },
                               margin: { l: 50, r: 20, t: 40, b: 40 },
                               height: 320,
@@ -3151,12 +3162,15 @@ export default function Dashboard() {
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                           <div className="bg-slate-900/40 p-3 rounded-xl border border-slate-800">
-                            <h4 className="text-xs font-bold text-center text-blue-400 mb-2">OpenMC Normalized Pin Power</h4>
+                            <h4 className="text-xs font-bold text-center text-blue-400 mb-2">OpenMC Relative Pin Power (P/P_avg)</h4>
                             <PlotlyChart
                               data={[{
                                 z: simulationResults.openmc.relative_power_map,
                                 type: 'heatmap',
                                 colorscale: 'Inferno',
+                                zmin: 0.0,
+                                zmax: 1.5,
+                                zauto: false,
                                 showscale: true,
                                 colorbar: { thickness: 10, len: 0.8 }
                               }]}
@@ -3173,12 +3187,15 @@ export default function Dashboard() {
                           </div>
 
                           <div className="bg-slate-900/40 p-3 rounded-xl border border-slate-800">
-                            <h4 className="text-xs font-bold text-center text-orange-400 mb-2">Geant4 Normalized Pin Power</h4>
+                            <h4 className="text-xs font-bold text-center text-orange-400 mb-2">Geant4 Relative Pin Power (P/P_avg)</h4>
                             <PlotlyChart
                               data={[{
                                 z: simulationResults.geant4.relative_power_map,
                                 type: 'heatmap',
                                 colorscale: 'Inferno',
+                                zmin: 0.0,
+                                zmax: 1.5,
+                                zauto: false,
                                 showscale: true,
                                 colorbar: { thickness: 10, len: 0.8 }
                               }]}

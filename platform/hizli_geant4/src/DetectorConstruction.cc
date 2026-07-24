@@ -77,7 +77,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct() {
     if (cfg.IsHex()) {
         G4double zPlanes[2] = { -halfZ, halfZ };
         G4double rInner[2]  = { 0.0, 0.0 };
-        G4double rOuter[2]  = { cfg.HexApothem() / std::cos(30.0 * deg), cfg.HexApothem() / std::cos(30.0 * deg) };
+        G4double rOuter[2]  = { cfg.HexApothem(), cfg.HexApothem() };
         auto assemblySolid = new G4Polyhedra("Assembly", 0.0 * deg, 360.0 * deg, 6, 2, zPlanes, rInner, rOuter);
         assemblyLV = new G4LogicalVolume(assemblySolid, water, "AssemblyLV");
     } else {

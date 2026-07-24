@@ -154,13 +154,15 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
                 results['peak_power_factor'] = 1.0
                 results['hot_channel_factor'] = 1.0
                 
-            # Compute relative power map
+            # Compute relative power map (P / P_avg, normalized around 1.0)
             if len(non_zero_powers) > 0:
                 rel_power = np.zeros_like(power_grid)
                 rel_power[power_grid > 0] = power_grid[power_grid > 0] / avg_power
                 results['relative_power_map'] = [[float(v) for v in row] for row in rel_power]
+                results['pin_power_map'] = results['relative_power_map']
             else:
-                results['relative_power_map'] = results['pin_power_map']
+                results['relative_power_map'] = [[0.0] * grid_res] * grid_res
+                results['pin_power_map'] = results['relative_power_map']
                 
         except Exception as e:
             print(f"Error parsing radial_pin_power Tally: {e}")
@@ -172,15 +174,50 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
         # Parse Axial Power Profile (axial_power)
         try:
             axial_tally = sp.get_tally(name='axial_power')
-            axial_data = axial_tally.get_slice(scores=['fission']).mean.flatten()
-            # Normalize to relative power (average over active elements = 1.0)
-            active_mask = axial_data > 0
-            average_power = float(np.mean(axial_data[active_mask])) if np.any(active_mask) else 1.0
-            norm_axial = [float(v / average_power) if average_power > 0 else float(v) for v in axial_data]
+            # get_slice yerine doğrudan mean verisini alıp düzleştiriyoruz:
+            raw_axial = axial_tally.mean.ravel()
+            
+            # Eğer 200 dilim geldiyse 100 dilime düşür (Re-binning):
+            if len(raw_axial) == 200:
+                raw_axial = raw_axial.reshape(-1, 2).mean(axis=1)
+            elif len(raw_axial) > 0 and len(raw_axial) != 100:
+                x_old = np.linspace(0, 1, len(raw_axial))
+                x_new = np.linspace(0, 1, 100)
+                raw_axial = np.interp(x_new, x_old, raw_axial)
+
+            # Relative Power Normalizasyonu
+            active_mask = raw_axial > 0
+            average_power = float(np.mean(raw_axial[active_mask])) if np.any(active_mask) else 1.0
+            
+            if average_power > 0:
+                norm_axial = (raw_axial / average_power).tolist()
+            else:
+                norm_axial = raw_axial.tolist()
+
             results['axial_power_profile'] = norm_axial
+            active_height_cm = 200.0
+            try:
+                geom_path = os.path.join(run_dir, "geometry.xml")
+                if os.path.exists(geom_path):
+                    old_cwd = os.getcwd()
+                    try:
+                        os.chdir(run_dir)
+                        geom = openmc.Geometry.from_xml("geometry.xml")
+                        bbox = geom.bounding_box
+                        if bbox and bbox[0] is not None and bbox[1] is not None:
+                            active_height_cm = float(bbox[1][2] - bbox[0][2])
+                    finally:
+                        os.chdir(old_cwd)
+            except Exception as geom_err:
+                print(f"Warning: could not parse active height from geometry: {geom_err}")
+
+            results['axial_z_heights'] = np.linspace(0, active_height_cm, len(norm_axial)).tolist()
+
         except Exception as e:
             print(f"Error parsing axial_power Tally: {e}")
-            results['axial_power_profile'] = [1.0] * 200
+            # FALLBACK DÜMDÜZ 1.0 OLMASIN, HATAYI GÖRELİM:
+            results['axial_power_profile'] = []
+            results['axial_z_heights'] = []
 
         # 4. Parse Fine Spatial Maps (170x170 grids of Flux, Fission, Absorption)
         try:
@@ -256,14 +293,19 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
             
             centers = []
             flux_normalized = []
+            total_flux_sum = float(np.sum(spec_data)) if np.sum(spec_data) > 0 else 1.0
+
             for i in range(len(e_bins) - 1):
                 low = e_bins[i][0]
                 high = e_bins[i][1]
-                centers.append(float(np.sqrt(low * high))) # geometric mean for log plots
+                centers.append(float(np.sqrt(low * high))) # geometric mean for log plots (eV)
                 
                 # Letarji hesabı (Kutu Genişliği): delta_ln_E = ln(high/low)
                 delta_ln_E = np.log(high / low)
-                flux_val = float(spec_data[i] / delta_ln_E) if delta_ln_E > 0 else float(spec_data[i])
+                if delta_ln_E > 0:
+                    flux_val = float((spec_data[i] / total_flux_sum) / delta_ln_E)
+                else:
+                    flux_val = float(spec_data[i])
                 flux_normalized.append(flux_val)
                 
             results['energy_spectrum_centers'] = centers
@@ -446,26 +488,18 @@ def parse_geant4_results(run_dir, prefix="geant4_run", lattice_type="Square"):
                     if len(parts) >= 2 and parts[0] != 'entries':
                         rows.append(float(parts[1])) # Sw is energy edep in MeV
             
-            # Active 17x17 map within 19x19 boundaries
-            if len(rows) == 361:
-                power_grid = np.zeros((17, 17))
-                for y in range(1, 18):
-                    for x in range(1, 18):
-                        power_grid[y-1, x-1] = rows[y * 19 + x]
+            # Active grid_res x grid_res map within (N x N) boundaries
+            total_len = len(rows)
+            N = int(np.round(np.sqrt(total_len))) if total_len > 0 else 0
+            if N * N == total_len and N >= 3:
+                actual_res = N - 2
+                power_grid = np.zeros((actual_res, actual_res))
+                for y in range(1, actual_res + 1):
+                    for x in range(1, actual_res + 1):
+                        power_grid[y-1, x-1] = rows[y * N + x]
                 
                 power_grid = np.flipud(power_grid)
                 power_grid = np.transpose(power_grid)
-                
-                # Crop to 15x15 if hexagonal to match OpenMC's mesh dimensions
-                if grid_res == 15:
-                    power_grid = power_grid[1:16, 1:16]
-                    
-                results['pin_power_map'] = [[float(v) for v in row] for row in power_grid]
-                
-                # Generate upscaled detailed maps for visual consistency
-                upscaled = np.repeat(np.repeat(power_grid, 10, axis=0), 10, axis=1)
-                results['flux_map'] = [[float(v) for v in row] for row in upscaled]
-                results['absorption_map'] = [[float(v * 1.1) for v in row] for row in upscaled]
                 
                 non_zero = power_grid[power_grid > 0]
                 if len(non_zero) > 0:
@@ -477,12 +511,20 @@ def parse_geant4_results(run_dir, prefix="geant4_run", lattice_type="Square"):
                     rel_grid = np.zeros_like(power_grid)
                     rel_grid[power_grid > 0] = power_grid[power_grid > 0] / avg_p
                     results['relative_power_map'] = [[float(v) for v in row] for row in rel_grid]
+                    results['pin_power_map'] = results['relative_power_map']
                 else:
                     results['peak_power_factor'] = 1.0
                     results['hot_channel_factor'] = 1.0
-                    results['relative_power_map'] = results['pin_power_map']
+                    results['relative_power_map'] = [[0.0] * grid_res] * grid_res
+                    results['pin_power_map'] = results['relative_power_map']
+                
+                # Generate upscaled detailed maps for visual consistency
+                upscaled = np.repeat(np.repeat(results['relative_power_map'], 10, axis=0), 10, axis=1)
+                results['flux_map'] = [[float(v) for v in row] for row in upscaled]
+                results['absorption_map'] = [[float(v * 1.1) for v in row] for row in upscaled]
             else:
                 results['pin_power_map'] = [[0.0] * grid_res] * grid_res
+                results['relative_power_map'] = [[0.0] * grid_res] * grid_res
                 results['relative_power_map'] = [[0.0] * grid_res] * grid_res
                 results['flux_map'] = [[0.0] * (grid_res * 10)] * (grid_res * 10)
                 results['absorption_map'] = [[0.0] * (grid_res * 10)] * (grid_res * 10)
@@ -530,13 +572,18 @@ def parse_geant4_results(run_dir, prefix="geant4_run", lattice_type="Square"):
                 smoothed[-2] = np.mean(norm_axial[-4:])
                 smoothed[-1] = np.mean(norm_axial[-3:])
                 results['axial_power_profile'] = [float(v) for v in smoothed]
+                active_height_cm = float(summary_data.get("active_height_cm", 200.0))
+                results['axial_z_heights'] = np.linspace(0, active_height_cm, len(smoothed)).tolist()
             else:
-                results['axial_power_profile'] = [1.0] * 100
+                results['axial_power_profile'] = []
+                results['axial_z_heights'] = []
         except Exception as e:
             print(f"Error parsing Geant4 axial power: {e}")
-            results['axial_power_profile'] = [1.0] * 100
+            results['axial_power_profile'] = []
+            results['axial_z_heights'] = []
     else:
-        results['axial_power_profile'] = [1.0] * 100
+        results['axial_power_profile'] = []
+        results['axial_z_heights'] = []
 
     # 4. Parse Energy Spectrum: <prefix>_h1_flux_E.csv
     spec_path = os.path.join(run_dir, f"{prefix}_h1_flux_E.csv")
@@ -558,19 +605,19 @@ def parse_geant4_results(run_dir, prefix="geant4_run", lattice_type="Square"):
             
             if len(edges) == 201 and len(values) == 202:
                 active_values = np.array(values[1:201])
-                volume_total = float(summary_data.get("volume_total_mm3", 1.0))
-                n_source = float(summary_data.get("source_neutrons", 1.0))
+                total_flux_sum = float(np.sum(active_values)) if np.sum(active_values) > 0 else 1.0
                 
                 centers = []
                 flux_normalized = []
                 for i in range(200):
-                    low = edges[i]
-                    high = edges[i+1]
-                    centers.append(float(np.sqrt(low * high)))
+                    # MeV -> eV Dönüşümü (x1e6)
+                    low_eV = edges[i] * 1.0e6
+                    high_eV = edges[i+1] * 1.0e6
+                    centers.append(float(np.sqrt(low_eV * high_eV)))
                     
-                    delta_ln_E = np.log(high / low)
-                    if delta_ln_E > 0 and volume_total > 0 and n_source > 0:
-                        flux_val = float(active_values[i] / (delta_ln_E * volume_total * n_source))
+                    delta_ln_E = np.log(high_eV / low_eV)
+                    if delta_ln_E > 0:
+                        flux_val = float((active_values[i] / total_flux_sum) / delta_ln_E)
                     else:
                         flux_val = float(active_values[i])
                     flux_normalized.append(flux_val)

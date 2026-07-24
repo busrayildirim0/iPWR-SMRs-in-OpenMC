@@ -544,7 +544,6 @@ def generate_smr_model(
         leakage_tally.scores = ['current']
         tallies_list.append(leakage_tally)
         
-    # IFP Kinetics does not require extra tallies in OpenMC when settings.ifp_n_generation is configured.
 
     
     # Export tallies

@@ -65,6 +65,11 @@ public:
     G4double ActiveSemK()         const;
     std::size_t SourceSize()      const { return fSource.size(); }
 
+    void ScorePinPower(G4int col, G4int row, G4int gridRes, G4double edepMeV);
+    void ScoreAxialPower(G4int bin, G4int nBins, G4double edepMeV);
+    void ScoreEnergyFlux(G4int bin, G4double trackLengthMm);
+    void WriteCsvOutputs(const G4String& prefix, G4int gridRes, G4double activeHeightCm) const;
+
     void WriteEigenSummary(const G4String& path) const;
 
 private:
@@ -96,6 +101,11 @@ private:
     G4double fActiveSumK2 = 0.0;
 
     std::vector<CycleRecord> fHistory;
+
+    mutable std::mutex fMapMutex;
+    std::vector<G4double> fPinPower;
+    std::vector<G4double> fAxialPower;
+    std::vector<G4double> fEnergyFlux;
 };
 
 #endif

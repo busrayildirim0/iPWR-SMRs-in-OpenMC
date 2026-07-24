@@ -76,7 +76,11 @@ G4double PrimaryGeneratorAction::SampleWattEnergy() {
 }
 
 void PrimaryGeneratorAction::GeneratePrimaries(G4Event *event) {
+  if (fFuelPinXY.empty()) {
+    BuildFuelPinPositions();
+  }
   const G4int nFuelPins = static_cast<G4int>(fFuelPinXY.size());
+  if (nFuelPins <= 0) return;
 
   for (G4int n = 0; n < fNeutronsPerEvent; ++n) {
     G4ThreeVector bankPos;
@@ -85,8 +89,8 @@ void PrimaryGeneratorAction::GeneratePrimaries(G4Event *event) {
       fParticleGun->SetParticlePosition(bankPos);
     } else {
       G4int pinIndex = static_cast<G4int>(G4UniformRand() * nFuelPins);
-      if (pinIndex >= nFuelPins)
-        pinIndex = nFuelPins - 1;
+      if (pinIndex < 0) pinIndex = 0;
+      if (pinIndex >= nFuelPins) pinIndex = nFuelPins - 1;
 
       const G4ThreeVector& c = fFuelPinXY[pinIndex];
 
@@ -106,7 +110,7 @@ void PrimaryGeneratorAction::GeneratePrimaries(G4Event *event) {
     const G4double energy = SampleWattEnergy();
     fParticleGun->SetParticleEnergy(energy);
 
-    G4AnalysisManager::Instance()->FillH1(0, energy / MeV);
+    G4AnalysisManager::Instance()->FillH1(RunAction::kSourceE, energy / MeV);
     if (fRunAction) {
       fRunAction->AddSourceNeutron();
     }
