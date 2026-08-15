@@ -45,7 +45,7 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
     const FissionBank& bank = FissionBank::GetInstance();
     static const G4bool kOnly = (std::getenv("SMR_KONLY") != nullptr);
     const G4bool eigenMode = bank.Enabled();
-    const G4bool fullScore = !eigenMode;
+    const G4bool fullScore = !eigenMode || bank.CurrentCycleActive();
     const G4bool histoScore = (!eigenMode || bank.CurrentCycleActive()) && !kOnly;
 
     G4AnalysisManager* analysis = G4AnalysisManager::Instance();
@@ -160,28 +160,30 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
     if (proc) {
         const G4String& pname = proc->GetProcessName();
         if (pname.find("ission") != G4String::npos) {
-            G4TrackVector* secondaries = fpSteppingManager ? fpSteppingManager->GetfSecondary() : nullptr;
+            const auto* secondaries = step->GetSecondaryInCurrentStep();
             G4int nu = 0;
             const G4bool eigenMode = FissionBank::GetInstance().Enabled();
 
             if (secondaries) {
-                for (auto* sec : *secondaries) {
-                    if (sec && sec->GetDefinition() == G4Neutron::Definition()) {
+                for (const auto* sec : *secondaries) {
+                    if (!sec) continue;
+                    auto* track = const_cast<G4Track*>(sec);
+                    if (sec->GetDefinition() == G4Neutron::Definition()) {
                         ++nu;
                         if (eigenMode) {
-                            sec->SetTrackStatus(fStopAndKill);
+                            // 1. ADIM: Nötron verilerini (konum) bankaya kaydet (fStopAndKill öncesi)
+                            FissionBank::GetInstance().Deposit(sec->GetPosition(), 1);
+                            // 2. ADIM: Bankaya alındıktan sonra bu nesilde takibi durdur
+                            track->SetTrackStatus(fStopAndKill);
                         }
-                    } else if (sec) {
-                        const_cast<G4Track*>(sec)->SetTrackStatus(fStopAndKill);
+                    } else {
+                        // Nötron dışı diğer ikincil parçacıkları (gama vb.) durdur
+                        track->SetTrackStatus(fStopAndKill);
                     }
                 }
             }
             fRunAction->AddFission(nu, thermalIncident);
             fEventAction->AddFissionNeutrons(nu);
-
-            if (nu > 0 && eigenMode) {
-                FissionBank::GetInstance().Deposit(postPoint->GetPosition(), nu);
-            }
         } else if (pname.find("apture") != G4String::npos) {
             fRunAction->AddCapture(thermalIncident);
         } else if (pname.find("Elastic") != G4String::npos) {
@@ -189,13 +191,15 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
         } else if (pname.find("nelastic") != G4String::npos) {
             fRunAction->AddInelastic();
             G4int nOut = 0;
-            G4TrackVector* secondaries = fpSteppingManager ? fpSteppingManager->GetfSecondary() : nullptr;
+            const auto* secondaries = step->GetSecondaryInCurrentStep();
             if (secondaries) {
-                for (auto* sec : *secondaries) {
-                    if (sec && sec->GetDefinition() == G4Neutron::Definition()) {
+                for (const auto* sec : *secondaries) {
+                    if (!sec) continue;
+                    auto* track = const_cast<G4Track*>(sec);
+                    if (sec->GetDefinition() == G4Neutron::Definition()) {
                         ++nOut;
-                    } else if (sec) {
-                        const_cast<G4Track*>(sec)->SetTrackStatus(fStopAndKill);
+                    } else {
+                        track->SetTrackStatus(fStopAndKill);
                     }
                 }
             }

@@ -14,89 +14,58 @@ const getSimplifiedLogs = (rawLogs, params) => {
   const lines = rawLogs.split('\n');
   const filtered = [];
   
-  let currentBatch = 0;
+  let openmcBatch = 0;
+  let g4Batch = 0;
   const totalBatches = params?.batches || 50;
-  let hasOpenMCProgress = false;
-  let hasG4Progress = false;
+  let hasOpenMC = false;
+  let hasG4 = false;
+  let printedOpenMCProgress = false;
+  let printedG4Progress = false;
+  
+  const flushOpenMCProgress = () => {
+    if (hasOpenMC && !printedOpenMCProgress) {
+      const pct = ((openmcBatch / totalBatches) * 100).toFixed(0);
+      filtered.push(`🔄 [OpenMC Progress] Batch: ${openmcBatch} / ${totalBatches} (${pct}%)`);
+      printedOpenMCProgress = true;
+    }
+  };
+  
+  const flushG4Progress = () => {
+    if (hasG4 && !printedG4Progress) {
+      const pct = ((g4Batch / totalBatches) * 100).toFixed(0);
+      filtered.push(`🔄 [Geant4 Progress] Batch: ${g4Batch} / ${totalBatches} (${pct}%)`);
+      printedG4Progress = true;
+    }
+  };
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
     
-    // Check if it's our custom API step message
+    // Explicitly filter out WARNING lines, Copyright banners, and noisy logs
+    if (trimmed.toUpperCase().includes('WARNING') || 
+        trimmed.includes('Copyright') || 
+        trimmed.includes('Git SHA1') ||
+        trimmed.includes('MIT, UChicago')) {
+      continue;
+    }
+    
+    // Check for Geant4 start (flushes OpenMC progress)
+    if (trimmed.startsWith('Generating Geant4') || trimmed.startsWith('Starting Geant4')) {
+      flushOpenMCProgress();
+      filtered.push(line);
+      continue;
+    }
+    
+    // Check if it's our custom API step message or statepoint
     if (trimmed.startsWith('Generating') || 
         trimmed.startsWith('Starting') || 
         trimmed.startsWith('Simulation finished') || 
         trimmed.startsWith('Job completed') ||
+        trimmed.startsWith('Creating state point') ||
         trimmed.startsWith('Error:') ||
-        trimmed.includes('Exception occurred') ||
-        trimmed.includes('Run Directory') ||
-        trimmed.includes('Command')) {
+        trimmed.includes('Exception occurred')) {
       filtered.push(line);
-      continue;
-    }
-    
-    // Keep OpenMC version header details
-    if (trimmed.includes('OpenMC v') || trimmed.includes('Copyright') || trimmed.includes('Git SHA1')) {
-      filtered.push(line);
-      continue;
-    }
-    
-    // Exclude noisy nuclide-specific cross section loading
-    if (trimmed.startsWith('Reading') && (trimmed.includes('from') || trimmed.includes('XS'))) {
-      if (trimmed.includes('settings.xml') || trimmed.includes('geometry.xml') || trimmed.includes('materials.xml') || trimmed.includes('tallies.xml')) {
-        filtered.push(line);
-      }
-      continue;
-    }
-    
-    // Exclude loading thermal scatter/nuclide data
-    if (trimmed.startsWith('Loading') || trimmed.startsWith('Pre-calculating') || trimmed.startsWith('Building') || trimmed.startsWith('Creating')) {
-      if (trimmed.includes('statepoint')) {
-        filtered.push(line);
-      }
-      continue;
-    }
-    
-    // Exclude Geant4 setup verbosity, warnings and separators
-    if (trimmed.startsWith('===') || 
-        trimmed.startsWith('---') || 
-        trimmed.includes('WWWW') ||
-        trimmed.includes('G4Exception') ||
-        trimmed.includes('warning message') ||
-        trimmed.includes('Ntuple') ||
-        trimmed.includes('Event modulo') ||
-        trimmed.includes('Setting is ignored') ||
-        trimmed.includes('G4TaskRunManager') || 
-        trimmed.includes('G4AnalysisManager') || 
-        trimmed.includes('G4AccumulableManager') || 
-        trimmed.includes('G4GDML') || 
-        trimmed.includes('G4PhysListFactory') ||
-        trimmed.includes('G4HadronicParameters') ||
-        trimmed.includes('G4NeutronHPManager') ||
-        trimmed.includes('G4IonParametrisedLossModel') ||
-        trimmed.includes('G4Decay') ||
-        trimmed.includes('G4RadioactiveDecay') ||
-        trimmed.includes('G4ProcessTable') ||
-        trimmed.includes('G4LevelReader') ||
-        trimmed.includes('G4CrossSectionDataStore') ||
-        trimmed.includes('G4VModularPhysicsList') ||
-        trimmed.includes('Creating') ||
-        trimmed.includes('workers') ||
-        trimmed.includes('Run terminated') ||
-        trimmed.includes('UserTrackingAction') ||
-        trimmed.includes('G4UserLimits') ||
-        trimmed.includes('physics list') ||
-        trimmed.includes('G4HepRepFile') ||
-        trimmed.includes('RegisterPhysics') ||
-        trimmed.includes('Register') ||
-        trimmed.includes('constructed') ||
-        trimmed.includes('initialized') ||
-        trimmed.includes('initialized successfully') ||
-        trimmed.includes('Run initialized') ||
-        trimmed.includes('run_h1_flux_E.csv') ||
-        trimmed.includes('RunAction') ||
-        trimmed.includes('EventAction')) {
       continue;
     }
     
@@ -104,8 +73,8 @@ const getSimplifiedLogs = (rawLogs, params) => {
     if (trimmed.includes('Simulating batch')) {
       const match = trimmed.match(/Simulating batch\s+(\d+)/);
       if (match) {
-        currentBatch = Math.max(currentBatch, parseInt(match[1]));
-        hasOpenMCProgress = true;
+        openmcBatch = Math.max(openmcBatch, parseInt(match[1]));
+        hasOpenMC = true;
       }
       continue;
     }
@@ -116,37 +85,33 @@ const getSimplifiedLogs = (rawLogs, params) => {
       const inactiveMatch = trimmed.match(/\[eigen\] gen\s+(\d+)\s+inactive/);
       if (activeMatch) {
         const activeIdx = parseInt(activeMatch[1]);
-        currentBatch = Math.max(currentBatch, activeIdx);
-        hasG4Progress = true;
+        g4Batch = Math.max(g4Batch, activeIdx);
+        hasG4 = true;
       } else if (inactiveMatch) {
         const inactiveIdx = parseInt(inactiveMatch[1]);
-        currentBatch = Math.max(currentBatch, inactiveIdx);
-        hasG4Progress = true;
+        g4Batch = Math.max(g4Batch, inactiveIdx);
+        hasG4 = true;
       }
       continue;
     }
     
-    // Include simulation results, summaries, warnings, errors
+    // Include simulation k-effective & final summary lines
     if (trimmed.includes('k-effective =') ||
         trimmed.includes('Average k-effective') ||
         trimmed.includes('Combined k-effective') ||
-        trimmed.includes('entropy =') ||
-        trimmed.includes('Calculation Rate:') ||
-        trimmed.toLowerCase().includes('error') ||
-        trimmed.toLowerCase().includes('warning') ||
-        trimmed.includes('reaction rates') ||
-        trimmed.includes('Elapsed time') ||
-        trimmed.includes('total batches')) {
+        trimmed.includes('Elapsed time')) {
+      if (!hasG4) {
+        flushOpenMCProgress();
+      } else {
+        flushG4Progress();
+      }
       filtered.push(line);
     }
   }
   
-  // If we found any progress, append a single clean progress status line at the bottom
-  if (hasOpenMCProgress || hasG4Progress) {
-    const pct = ((currentBatch / totalBatches) * 100).toFixed(0);
-    const solverType = hasG4Progress ? 'Geant4' : 'OpenMC';
-    filtered.push(`🔄 [${solverType} Progress] Batch: ${currentBatch} / ${totalBatches} (${pct}%)`);
-  }
+  // Ensure progress lines are flushed at end if not already printed
+  flushOpenMCProgress();
+  flushG4Progress();
   
   return filtered.join('\n');
 };
@@ -426,7 +391,7 @@ export default function Dashboard() {
 
   // Fetch SMR Presets on mount
   useEffect(() => {
-    fetch('/api/presets')
+    fetch('api/presets')
       .then(res => res.json())
       .then(data => {
         setPresets(data);
@@ -456,7 +421,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (resultsTab === 'xs' && !xsData && !xsLoading) {
       setXsLoading(true);
-      fetch('/api/nuclear-data/xs')
+      fetch('api/nuclear-data/xs')
         .then(res => {
           if (!res.ok) throw new Error("Could not fetch nuclear database");
           return res.json();
@@ -477,7 +442,7 @@ export default function Dashboard() {
     let interval = null;
     if (mainTab === 'dataset' || datasetStatus.active) {
       const checkStatus = () => {
-        fetch('/api/dataset/status')
+        fetch('api/dataset/status')
           .then(res => res.json())
           .then(data => {
             setDatasetStatus(prev => {
@@ -575,7 +540,7 @@ export default function Dashboard() {
     setSimulationResults(null);
     setActiveOverlay('none');
     
-    fetch('/api/simulate', {
+    fetch('api/simulate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params)
@@ -600,7 +565,7 @@ export default function Dashboard() {
     let statusInterval = null;
 
     const pollLogs = () => {
-      fetch(`/api/job/${id}/logs`)
+      fetch(`api/job/${id}/logs`)
         .then(res => res.json())
         .then(data => {
           setSimulationLogs(data.logs);
@@ -613,7 +578,7 @@ export default function Dashboard() {
     };
 
     const pollStatus = () => {
-      fetch(`/api/job/${id}/status`)
+      fetch(`api/job/${id}/status`)
         .then(res => res.json())
         .then(data => {
           setJobStatus(data.status);
@@ -642,7 +607,7 @@ export default function Dashboard() {
 
   // Fetch parsed simulation results
   const fetchResults = (id) => {
-    fetch(`/api/job/${id}/results`)
+    fetch(`api/job/${id}/results`)
       .then(res => res.json())
       .then(data => {
         setSimulationResults(data);
@@ -663,7 +628,7 @@ export default function Dashboard() {
       base_params: params
     };
     
-    fetch('/api/dataset/generate', {
+    fetch('api/dataset/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dParams)
@@ -688,7 +653,7 @@ export default function Dashboard() {
 
   // Stop dataset generation
   const stopDatasetGeneration = () => {
-    fetch('/api/dataset/stop', { method: 'POST' })
+    fetch('api/dataset/stop', { method: 'POST' })
       .then(res => res.json())
       .then(data => {
         alert("Stopping dataset generation. Please wait for the current case to finish.");
@@ -985,6 +950,14 @@ export default function Dashboard() {
               {engineData?.peak_power_factor?.toFixed(3) ?? "N/A"}
             </h4>
             <span className="text-[10px] text-[#7A828F] mt-1">Max Pin / Average Pin</span>
+          </div>
+
+          <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-teal-400 flex flex-col justify-between rounded-[10px]">
+            <span className="text-[10px] font-bold text-[#A0A7B4] uppercase tracking-wider">Avg Neutrons / Fission (ν̄)</span>
+            <h4 className="text-lg font-bold text-[#F5F5F5] mt-2 font-mono">
+              {engineData?.avg_nu ? engineData.avg_nu.toFixed(4) : "N/A"}
+            </h4>
+            <span className="text-[10px] text-[#7A828F] mt-1">Neutron Yield Per Fission</span>
           </div>
 
           <div className="panel bg-slate-900/40 p-4 border-l-4 border-l-orange-400 flex flex-col justify-between rounded-[10px]">
@@ -2919,6 +2892,11 @@ export default function Dashboard() {
                                   name: "Leakage Rate",
                                   key: "leakage_rate",
                                   format: (v) => v.toExponential(4)
+                                },
+                                {
+                                  name: "Avg Neutrons/Fission (ν̄)",
+                                  key: "avg_nu",
+                                  format: (v) => v ? v.toFixed(4) : "N/A"
                                 },
                                 {
                                   name: "Pin Power Peaking Factor (Fq)",

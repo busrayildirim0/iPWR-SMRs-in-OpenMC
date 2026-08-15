@@ -57,15 +57,16 @@ RegionVolumes ComputeRegionVolumes() {
 
     const G4double activeH = cfg.ActiveHeight();
     
-    G4double motherHalfXY;
-    if (cfg.IsHex()) {
-        motherHalfXY = cfg.HexApothem() + cfg.PinPitch();
-    } else {
-        motherHalfXY = cfg.AssemblyHalfXY();
-    }
-
     RegionVolumes v;
-    v.total = 8.0 * motherHalfXY * motherHalfXY * (activeH / 2.0);
+    if (cfg.IsHex()) {
+        const G4double apothem = cfg.HexApothem();
+        const G4double crossSectionArea = 2.0 * std::sqrt(3.0) * apothem * apothem;
+        v.total = crossSectionArea * activeH;
+    } else {
+        const G4double motherHalfXY = cfg.AssemblyHalfXY();
+        const G4double sideLength = 2.0 * motherHalfXY;
+        v.total = sideLength * sideLength * activeH;
+    }
     
     v.fuel = nFuelPins * AnnularVolume(0.0, cfg.FuelRadius(), activeH);
 
@@ -112,34 +113,34 @@ G4int RunAction::fAnalysisVerbose = 0;
 
 RunAction::RunAction() {
     auto accMgr = G4AccumulableManager::Instance();
-    accMgr->RegisterAccumulable(fEdepTotal);
-    accMgr->RegisterAccumulable(fThermalCount);
-    accMgr->RegisterAccumulable(fStepCount);
-    accMgr->RegisterAccumulable(fSourceCount);
-    accMgr->RegisterAccumulable(fFissionCount);
-    accMgr->RegisterAccumulable(fFissionNeutrons);
-    accMgr->RegisterAccumulable(fTrackLengthTotal);
-    accMgr->RegisterAccumulable(fTrackLengthFuel);
-    accMgr->RegisterAccumulable(fTrackLengthModerator);
-    accMgr->RegisterAccumulable(fTrackLengthZircaloy);
-    accMgr->RegisterAccumulable(fTrackLengthGas);
-    accMgr->RegisterAccumulable(fRadialBoundaryCrossings);
-    accMgr->RegisterAccumulable(fAxialBoundaryCrossings);
-    accMgr->RegisterAccumulable(fBoundaryReflections);
-    accMgr->RegisterAccumulable(fCaptureCount);
-    accMgr->RegisterAccumulable(fLeakCount);
-    accMgr->RegisterAccumulable(fElasticCount);
-    accMgr->RegisterAccumulable(fInelasticCount);
-    accMgr->RegisterAccumulable(fThermalFiss);
-    accMgr->RegisterAccumulable(fFastFiss);
-    accMgr->RegisterAccumulable(fThermalCap);
-    accMgr->RegisterAccumulable(fFastCap);
-    accMgr->RegisterAccumulable(fOtherAbsCount);
-    accMgr->RegisterAccumulable(fThermalOtherAbs);
-    accMgr->RegisterAccumulable(fFastOtherAbs);
-    accMgr->RegisterAccumulable(fBatchCount);
-    accMgr->RegisterAccumulable(fSumK);
-    accMgr->RegisterAccumulable(fSumK2);
+    accMgr->Register(fEdepTotal);
+    accMgr->Register(fThermalCount);
+    accMgr->Register(fStepCount);
+    accMgr->Register(fSourceCount);
+    accMgr->Register(fFissionCount);
+    accMgr->Register(fFissionNeutrons);
+    accMgr->Register(fTrackLengthTotal);
+    accMgr->Register(fTrackLengthFuel);
+    accMgr->Register(fTrackLengthModerator);
+    accMgr->Register(fTrackLengthZircaloy);
+    accMgr->Register(fTrackLengthGas);
+    accMgr->Register(fRadialBoundaryCrossings);
+    accMgr->Register(fAxialBoundaryCrossings);
+    accMgr->Register(fBoundaryReflections);
+    accMgr->Register(fCaptureCount);
+    accMgr->Register(fLeakCount);
+    accMgr->Register(fElasticCount);
+    accMgr->Register(fInelasticCount);
+    accMgr->Register(fThermalFiss);
+    accMgr->Register(fFastFiss);
+    accMgr->Register(fThermalCap);
+    accMgr->Register(fFastCap);
+    accMgr->Register(fOtherAbsCount);
+    accMgr->Register(fThermalOtherAbs);
+    accMgr->Register(fFastOtherAbs);
+    accMgr->Register(fBatchCount);
+    accMgr->Register(fSumK);
+    accMgr->Register(fSumK2);
 
     if (G4Threading::IsMasterThread()) {
         fMessenger = new G4GenericMessenger(

@@ -146,7 +146,7 @@ def run_openmc_sync(run_dir):
         
     env = os.environ.copy()
     if is_linux:
-        env["OPENMC_CROSS_SECTIONS"] = "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml"
+        env["OPENMC_CROSS_SECTIONS"] = os.getenv("OPENMC_CROSS_SECTIONS", "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml")
         
     subprocess.run(cmd, cwd=cwd_dir, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -348,7 +348,7 @@ def run_simulation_thread(job_id, run_dir, params: SimulationParams):
         is_linux = sys.platform == 'linux'
         env = os.environ.copy()
         if is_linux:
-            env["OPENMC_CROSS_SECTIONS"] = "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml"
+            env["OPENMC_CROSS_SECTIONS"] = os.getenv("OPENMC_CROSS_SECTIONS", "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml")
             
         openmc_results = None
         if params.run_openmc:
@@ -694,6 +694,10 @@ integrator.integrate()
             jobs[job_id]["logs"] += "\nGeant4 Simulation finished! Parsing results...\n"
             geant4_results = parse_geant4_results(run_dir, prefix="geant4_run", lattice_type=params.lattice_type)
             geant4_results["offset"] = offset
+            if geant4_results and "k_eff" in geant4_results:
+                k_val = geant4_results.get("k_eff", 0.0)
+                k_err = geant4_results.get("k_eff_std", 0.0)
+                jobs[job_id]["logs"] += f" Combined k-effective        = {k_val:.5f} +/- {k_err:.5f}\n"
 
         # Merge Results
         final_results = {}
@@ -904,7 +908,7 @@ def run_dataset_generation_thread(job_id, params: DatasetGenParams):
                 # Run simulation synchronously
                 env_ds = os.environ.copy()
                 if is_linux:
-                    env_ds["OPENMC_CROSS_SECTIONS"] = "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml"
+                    env_ds["OPENMC_CROSS_SECTIONS"] = os.getenv("OPENMC_CROSS_SECTIONS", "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml")
                 subprocess.run(cmd, cwd=cwd_dir, env=env_ds, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 # 3. Parse results
