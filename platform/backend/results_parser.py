@@ -79,16 +79,22 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
         # 2. Parse Global Reactions
         try:
             rx_tally = sp.get_tally(name='Global_Reactions')
-            fission_t = rx_tally.get_slice(scores=['fission']).mean.sum()
-            absorption_t = rx_tally.get_slice(scores=['absorption']).mean.sum()
-            n2n_t = rx_tally.get_slice(scores=['(n,2n)']).mean.sum()
-            scatter_t = rx_tally.get_slice(scores=['scatter']).mean.sum()
+            fission_t = float(rx_tally.get_slice(scores=['fission']).mean.sum())
+            try:
+                nu_fission_t = float(rx_tally.get_slice(scores=['nu-fission']).mean.sum())
+            except Exception:
+                nu_fission_t = fission_t * 2.43
+                
+            absorption_t = float(rx_tally.get_slice(scores=['absorption']).mean.sum())
+            n2n_t = float(rx_tally.get_slice(scores=['(n,2n)']).mean.sum())
+            scatter_t = float(rx_tally.get_slice(scores=['scatter']).mean.sum())
             
-            results['global_fission_rate'] = float(fission_t)
-            results['global_absorption_rate'] = float(absorption_t)
-            results['global_n2n_rate'] = float(n2n_t)
-            results['global_scatter_rate'] = float(scatter_t)
-            results['global_neutron_production_rate'] = float(fission_t * 2.43) # approx nu=2.43 for U235
+            results['global_fission_rate'] = fission_t
+            results['global_absorption_rate'] = absorption_t
+            results['global_n2n_rate'] = n2n_t
+            results['global_scatter_rate'] = scatter_t
+            results['global_neutron_production_rate'] = nu_fission_t
+            results['avg_nu'] = (nu_fission_t / fission_t) if fission_t > 0 else 2.43
         except Exception as e:
             print(f"Warning parsing global reactions: {e}")
             results['global_fission_rate'] = 0.0
@@ -96,6 +102,7 @@ def parse_openmc_results(run_dir, lattice_type="Square"):
             results['global_n2n_rate'] = 0.0
             results['global_scatter_rate'] = 0.0
             results['global_neutron_production_rate'] = 0.0
+            results['avg_nu'] = 2.43
             
         # Leakage rate
         try:
@@ -451,14 +458,17 @@ def parse_geant4_results(run_dir, prefix="geant4_run", lattice_type="Square"):
     results['gen_time'] = None   # Not computed by Geant4
     
     # Global Reaction rates
-    results['global_fission_rate'] = float(summary_data.get("fissions_induced", 0.0))
+    fiss_induced = float(summary_data.get("fissions_induced", 0.0))
+    fiss_produced = float(summary_data.get("fission_neutrons_produced", 0.0))
+    results['global_fission_rate'] = fiss_induced
     results['global_absorption_rate'] = float(summary_data.get("absorptions", 0.0))
     results['global_n2n_rate'] = 0.0  # (n,2n) not tracked separately in Geant4
     
     elastic = float(summary_data.get("elastic_scatters", 0.0))
     inelastic = float(summary_data.get("inelastic_scatters", 0.0))
     results['global_scatter_rate'] = elastic + inelastic
-    results['global_neutron_production_rate'] = float(summary_data.get("fission_neutrons_produced", 0.0))
+    results['global_neutron_production_rate'] = fiss_produced
+    results['avg_nu'] = (fiss_produced / fiss_induced) if fiss_induced > 0 else 0.0
     results['leakage_rate'] = float(summary_data.get("leakage", 0.0))
     
     # DPA proxy: use integral flux in Zircaloy cladding (proportional to fast neutron damage)
@@ -499,7 +509,6 @@ def parse_geant4_results(run_dir, prefix="geant4_run", lattice_type="Square"):
                         power_grid[y-1, x-1] = rows[y * N + x]
                 
                 power_grid = np.flipud(power_grid)
-                power_grid = np.transpose(power_grid)
                 
                 non_zero = power_grid[power_grid > 0]
                 if len(non_zero) > 0:

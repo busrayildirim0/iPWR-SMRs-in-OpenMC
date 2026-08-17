@@ -8,7 +8,7 @@ services:
     image: busrayildiriim/smr-core:latest
     container_name: smr-core-container
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8005:8000"
     volumes:
       # Mount cross sections from host (.env configurable)
       - ${OPENMC_CROSS_SECTIONS_DIR:-/home/busra/openmc_project}:/data
@@ -27,7 +27,7 @@ services:
     image: busrayildiriim/web-dashboard:latest
     container_name: web-dashboard-container
     ports:
-      - "80:80"
+      - "0.0.0.0:6010:80"
     depends_on:
       - smr-core
     restart: always

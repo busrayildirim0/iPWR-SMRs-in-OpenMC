@@ -447,7 +447,7 @@ def generate_smr_model(
     # Global Reaction Rates Tally
     rx_tally = openmc.Tally(name='Global_Reactions')
     # Filter by materials to capture global reactions
-    rx_tally.scores = ['fission', 'absorption', '(n,2n)', 'scatter']
+    rx_tally.scores = ['fission', 'nu-fission', 'absorption', '(n,2n)', 'scatter']
     tallies_list.append(rx_tally)
     
     # Fuel cells list for filtering

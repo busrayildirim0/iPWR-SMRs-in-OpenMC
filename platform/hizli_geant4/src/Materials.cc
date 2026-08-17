@@ -44,12 +44,10 @@ void Materials::DefineMaterials() {
     G4Element* elO    = nist->FindOrBuildElement("O");
     G4Element* elB    = nist->FindOrBuildElement("B");
 
-    // =========================================================================
-    // 🔴 DÜZELTİLEN KISIM: Bor PPM -> Kütle Fraksiyonu (Weight Fraction) Hesabı
-    // =========================================================================
+
     const G4double ppm = cfg.BoronPPM(); 
-    const G4double wB = ppm * 1.0e-6;    // Bor'un Toplam Karışım İçindeki Kütlesel Oranı
-    const G4double wH2O = 1.0 - wB;      // Suyun Geri Kalan Kütlesel Oranı
+    const G4double wB = ppm * 1.0e-6;    
+    const G4double wH2O = 1.0 - wB;     
     
     // Suyu oluşturan H ve O'nun saf su içindeki kütle fraksiyonları
     const G4double mH2O = 2.0 * 1.0079 + 15.999;
@@ -66,7 +64,6 @@ void Materials::DefineMaterials() {
     if (wB > 0.0) {
         fWater->AddElement(elB, wB);
     }
-    // =========================================================================
 
     if (cfg.HeDensity() > 0.0) {
         fHelium = new G4Material("GapHelium", cfg.HeDensity(), 1);
