@@ -10,12 +10,15 @@ services:
     ports:
       - "0.0.0.0:8005:8000"
     volumes:
-      # Mount cross sections from host (.env configurable)
-      - ${OPENMC_CROSS_SECTIONS_DIR:-/home/busra/openmc_project}:/data
+      # Mount OpenMC cross sections from host (.env configurable)
+      - ${OPENMC_CROSS_SECTIONS_DIR:-/home/byildirim/Desktop/endfb-vii.1-hdf5}:/data/endfb-vii.1-hdf5
+      # Mount Geant4 data library from host (.env configurable)
+      - ${GEANT4_DATA_DIR:-/home/byildirim/Desktop/geant4_data}:/data/geant4_data
       # Mount runs folder for persistent output results
       - ./platform/backend/runs:/app/platform/backend/runs
     environment:
       - OPENMC_CROSS_SECTIONS=/data/endfb-vii.1-hdf5/cross_sections.xml
+      - G4NEUTRONHPDATA_ROOT=/data/geant4_data
       - DOCKER_ENV=1
       - GEANT4_EXE=/app/platform/hizli_geant4/beavrs_assembly
     restart: always
