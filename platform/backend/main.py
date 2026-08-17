@@ -127,9 +127,99 @@ def download_depletion_chain():
         except Exception as e:
             print(f"Failed to download depletion chain: {e}")
 
+def resolve_openmc_cross_sections() -> str:
+    """
+    Dynamically resolve OPENMC_CROSS_SECTIONS path from environment or common mount points.
+    """
+    env_xs = os.getenv("OPENMC_CROSS_SECTIONS")
+    if env_xs and os.path.exists(env_xs):
+        return env_xs
+
+    candidates = [
+        "/data/endfb-vii.1-hdf5/cross_sections.xml",
+        "/data/cross_sections.xml",
+        "/home/byildirim/Desktop/endfb-vii.1-hdf5/cross_sections.xml",
+        "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return env_xs or "/data/endfb-vii.1-hdf5/cross_sections.xml"
+
+
+def resolve_g4_neutron_hp_data(fuel_temp_k: float = 900.0) -> str:
+    """
+    Dynamically resolves the best matching G4NEUTRONHPDATA directory for the given fuel temperature.
+    1. Checks G4NEUTRONHPDATA_ROOT / GEANT4_DATA_DIR / /data/geant4_data / /home/byildirim/Desktop/geant4_data
+    2. If subdirectories with temperatures exist (e.g. G4NDL4.7_T600K, G4NDL4.7_900K, ENDF-VII.1_1200K),
+       picks the one closest to fuel_temp_k.
+    3. If no temperature-specific directory exists, uses G4NDL4.7 / ENDF-VII.1 or the root folder itself.
+    """
+    explicit_env = os.getenv("G4NEUTRONHPDATA")
+    if explicit_env and os.path.exists(explicit_env) and not os.getenv("G4NEUTRONHPDATA_ROOT"):
+        return explicit_env
+
+    roots = [
+        os.getenv("G4NEUTRONHPDATA_ROOT"),
+        os.getenv("GEANT4_DATA_DIR"),
+        "/data/geant4_data",
+        "/home/byildirim/Desktop/geant4_data",
+        "/home/busra/geant4/geant4-install/share/Geant4/data",
+        "/opt/conda/share/Geant4/data"
+    ]
+
+    import re
+    valid_root = None
+    for r in roots:
+        if r and os.path.isdir(r):
+            valid_root = r
+            break
+
+    if not valid_root:
+        return explicit_env or "/data/geant4_data/G4NDL4.7"
+
+    # Check if the root directory itself has G4NDL subchannels (e.g. Capture, Elastic, Fission, etc.)
+    if os.path.exists(os.path.join(valid_root, "Capture")) or os.path.exists(os.path.join(valid_root, "Elastic")):
+        return valid_root
+
+    # Scan subdirectories
+    subdirs = [os.path.join(valid_root, d) for d in os.listdir(valid_root) if os.path.isdir(os.path.join(valid_root, d))]
+    if not subdirs:
+        return valid_root
+
+    # Look for temperature tags in directory names (e.g. T300K, 600K, _900K, etc.)
+    temp_matches = []
+    for s in subdirs:
+        base = os.path.basename(s)
+        match = re.search(r'[tT]?(\d{3,4})\s*[kK]?', base)
+        if match:
+            try:
+                t_val = float(match.group(1))
+                if 200.0 <= t_val <= 3000.0:
+                    temp_matches.append((abs(t_val - fuel_temp_k), t_val, s))
+            except ValueError:
+                pass
+
+    if temp_matches:
+        temp_matches.sort(key=lambda x: x[0])
+        chosen = temp_matches[0][2]
+        print(f"[Geant4 Data] Fuel Temp: {fuel_temp_k} K -> Selected library: {chosen} (Library T={temp_matches[0][1]} K)")
+        return chosen
+
+    # If no temperature tag, look for standard G4NDL or ENDF folder
+    for s in subdirs:
+        base = os.path.basename(s).lower()
+        if "g4ndl" in base or "endf" in base or "jeff" in base:
+            return s
+
+    # Fallback to the first subdirectory or root
+    return subdirs[0]
+
+
 def run_openmc_sync(run_dir):
     import sys
     is_linux = sys.platform == 'linux'
+    openmc_xs = resolve_openmc_cross_sections()
     if is_linux:
         cmd = ["openmc"]
         cwd_dir = run_dir
@@ -138,7 +228,7 @@ def run_openmc_sync(run_dir):
         cmd = [
             "wsl", "bash", "-c",
             f"source /home/busra/miniconda3/bin/activate openmc && "
-            f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
+            f"export OPENMC_CROSS_SECTIONS={openmc_xs} && "
             f"cd \"{wsl_run_dir}\" && "
             f"openmc"
         ]
@@ -146,7 +236,7 @@ def run_openmc_sync(run_dir):
         
     env = os.environ.copy()
     if is_linux:
-        env["OPENMC_CROSS_SECTIONS"] = os.getenv("OPENMC_CROSS_SECTIONS", "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml")
+        env["OPENMC_CROSS_SECTIONS"] = openmc_xs
         
     subprocess.run(cmd, cwd=cwd_dir, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -237,6 +327,10 @@ def run_geant4_sync(run_dir, macro_path, params: SimulationParams = None):
     g4_exe = os.getenv("GEANT4_EXE", "/mnt/c/Users/Hp/OneDrive/Masaüstü/SMRs modeling and analysis/platform/hizli_geant4/build/beavrs_assembly")
     is_docker = os.getenv("DOCKER_ENV") == "1"
     
+    fuel_temp = getattr(params, 'fuel_temperature', 900.0) if params else 900.0
+    g4_ndl_path = resolve_g4_neutron_hp_data(fuel_temp)
+    tendl_path = os.getenv("G4PARTICLEHPDATA", "/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4")
+
     if is_docker:
         cmd = [
             "micromamba", "run", "-n", "base",
@@ -247,8 +341,8 @@ def run_geant4_sync(run_dir, macro_path, params: SimulationParams = None):
         cmd = [
             "bash", "-c",
             f"source /home/busra/geant4/geant4-install/bin/geant4.sh && "
-            f"export G4NEUTRONHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/ENDF-VII.1\" && "
-            f"export G4PARTICLEHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4\" && "
+            f"export G4NEUTRONHPDATA=\"{g4_ndl_path}\" && "
+            f"export G4PARTICLEHPDATA=\"{tendl_path}\" && "
             f"cd \"{run_dir}\" && "
             f"\"{g4_exe}\" -m \"{macro_path}\""
         ]
@@ -259,16 +353,16 @@ def run_geant4_sync(run_dir, macro_path, params: SimulationParams = None):
         cmd = [
             "wsl", "bash", "-c",
             f"source /home/busra/geant4/geant4-install/bin/geant4.sh && "
-            f"export G4NEUTRONHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/ENDF-VII.1\" && "
-            f"export G4PARTICLEHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4\" && "
+            f"export G4NEUTRONHPDATA=\"{g4_ndl_path}\" && "
+            f"export G4PARTICLEHPDATA=\"{tendl_path}\" && "
             f"cd \"{wsl_run_dir}\" && "
             f"\"{g4_exe}\" -m \"{wsl_macro_path}\""
         ]
         cwd_dir = None
         
     env = os.environ.copy()
-    env["G4NEUTRONHPDATA"] = "/home/busra/geant4/geant4-install/share/Geant4/data/ENDF-VII.1"
-    env["G4PARTICLEHPDATA"] = "/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4"
+    env["G4NEUTRONHPDATA"] = g4_ndl_path
+    env["G4PARTICLEHPDATA"] = tendl_path
     if params and getattr(params, 'g4_k_only', False):
         env["SMR_KONLY"] = "1"
     subprocess.run(cmd, cwd=cwd_dir, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -346,14 +440,15 @@ def run_simulation_thread(job_id, run_dir, params: SimulationParams):
         
         import sys
         is_linux = sys.platform == 'linux'
+        openmc_xs = resolve_openmc_cross_sections()
         env = os.environ.copy()
         if is_linux:
-            env["OPENMC_CROSS_SECTIONS"] = os.getenv("OPENMC_CROSS_SECTIONS", "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml")
+            env["OPENMC_CROSS_SECTIONS"] = openmc_xs
             
         openmc_results = None
         if params.run_openmc:
             jobs[job_id]["status"] = "running"
-            jobs[job_id]["logs"] += "Starting OpenMC Monte Carlo Simulation in WSL...\n"
+            jobs[job_id]["logs"] += "Starting OpenMC Monte Carlo Simulation...\n"
             
             if params.depletion_enabled:
                 # Write run_depletion.py to run_dir
@@ -383,7 +478,7 @@ integrator.integrate()
                     cmd = [
                         "wsl", "bash", "-c",
                         f"source /home/busra/miniconda3/bin/activate openmc && "
-                        f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
+                        f"export OPENMC_CROSS_SECTIONS={openmc_xs} && "
                         f"cd \"{wsl_run_dir}\" && "
                         f"python3 run_depletion.py"
                     ]
@@ -397,7 +492,7 @@ integrator.integrate()
                     cmd = [
                         "wsl", "bash", "-c",
                         f"source /home/busra/miniconda3/bin/activate openmc && "
-                        f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
+                        f"export OPENMC_CROSS_SECTIONS={openmc_xs} && "
                         f"cd \"{wsl_run_dir}\" && "
                         f"openmc"
                     ]
@@ -638,8 +733,11 @@ integrator.integrate()
             if params.g4_k_only:
                 g4_env["SMR_KONLY"] = "1"
             
-            g4_env["G4NEUTRONHPDATA"] = "/home/busra/geant4/geant4-install/share/Geant4/data/ENDF-VII.1"
-            g4_env["G4PARTICLEHPDATA"] = "/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4"
+            g4_ndl_path = resolve_g4_neutron_hp_data(params.fuel_temperature)
+            tendl_path = os.getenv("G4PARTICLEHPDATA", "/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4")
+
+            g4_env["G4NEUTRONHPDATA"] = g4_ndl_path
+            g4_env["G4PARTICLEHPDATA"] = tendl_path
                 
             if is_docker:
                 cmd_g4 = [
@@ -651,8 +749,8 @@ integrator.integrate()
                 cmd_g4 = [
                     "bash", "-c",
                     f"source /home/busra/geant4/geant4-install/bin/geant4.sh && "
-                    f"export G4NEUTRONHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/ENDF-VII.1\" && "
-                    f"export G4PARTICLEHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4\" && "
+                    f"export G4NEUTRONHPDATA=\"{g4_ndl_path}\" && "
+                    f"export G4PARTICLEHPDATA=\"{tendl_path}\" && "
                     f"cd \"{run_dir}\" && "
                     f"\"{g4_exe}\" -m \"{macro_path}\""
                 ]
@@ -663,8 +761,8 @@ integrator.integrate()
                 cmd_g4 = [
                     "wsl", "bash", "-c",
                     f"source /home/busra/geant4/geant4-install/bin/geant4.sh && "
-                    f"export G4NEUTRONHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/ENDF-VII.1\" && "
-                    f"export G4PARTICLEHPDATA=\"/home/busra/geant4/geant4-install/share/Geant4/data/G4TENDL1.4\" && "
+                    f"export G4NEUTRONHPDATA=\"{g4_ndl_path}\" && "
+                    f"export G4PARTICLEHPDATA=\"{tendl_path}\" && "
                     f"cd \"{wsl_run_dir}\" && "
                     f"\"{g4_exe}\" -m \"{wsl_macro_path}\""
                 ]
@@ -891,6 +989,7 @@ def run_dataset_generation_thread(job_id, params: DatasetGenParams):
                 )
                 
                 # 2. Run OpenMC
+                openmc_xs = resolve_openmc_cross_sections()
                 if is_linux:
                     cmd = ["openmc"]
                     cwd_dir = case_dir
@@ -899,7 +998,7 @@ def run_dataset_generation_thread(job_id, params: DatasetGenParams):
                     cmd = [
                         "wsl", "bash", "-c",
                         f"source /home/busra/miniconda3/bin/activate openmc && "
-                        f"export OPENMC_CROSS_SECTIONS=/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml && "
+                        f"export OPENMC_CROSS_SECTIONS={openmc_xs} && "
                         f"cd \"{wsl_run_dir}\" && "
                         f"openmc"
                     ]
@@ -908,7 +1007,7 @@ def run_dataset_generation_thread(job_id, params: DatasetGenParams):
                 # Run simulation synchronously
                 env_ds = os.environ.copy()
                 if is_linux:
-                    env_ds["OPENMC_CROSS_SECTIONS"] = os.getenv("OPENMC_CROSS_SECTIONS", "/home/busra/openmc_project/endfb-vii.1-hdf5/cross_sections.xml")
+                    env_ds["OPENMC_CROSS_SECTIONS"] = openmc_xs
                 subprocess.run(cmd, cwd=cwd_dir, env=env_ds, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 # 3. Parse results
